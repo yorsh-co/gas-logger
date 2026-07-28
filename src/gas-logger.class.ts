@@ -4,6 +4,7 @@
 class GasLogger {
   private _level: GasLoggerLevel;
   private _sheetConfig: GasLoggerSheetConfig;
+  private _sheetLevel: GasLoggerLevel;
   private _sheet: GoogleAppsScript.Spreadsheet.Sheet | null;
   private _bindings: GasLoggerMeta;
   private _buffer: Array<[string, string, string, string]>;
@@ -12,6 +13,7 @@ class GasLogger {
 
   constructor(options: GasLoggerOptions = {}) {
     this._level = options.level || 'info';
+    this._sheetLevel = options.sheetLevel || this._level;
 
     this._sheetConfig = options.sheetConfig || ({} as GasLoggerSheetConfig);
     this._sheet = Object.keys(this._sheetConfig).length
@@ -185,11 +187,13 @@ class GasLogger {
   }
 
   /**
-   * Checks if the requested log level is in enable according to the instance's
-   * _level property.
+   * Checks whether `level` meets the given threshold.
    */
-  private _isEnabled(level: GasLoggerLevel): boolean {
-    return GAS_LOGGER_LEVELS[level] >= GAS_LOGGER_LEVELS[this._level];
+  private _meetsLevel(
+    level: GasLoggerLevel,
+    threshold: GasLoggerLevel,
+  ): boolean {
+    return GAS_LOGGER_LEVELS[level] >= GAS_LOGGER_LEVELS[threshold];
   }
 
   /**
@@ -226,19 +230,27 @@ class GasLogger {
   }
 
   /**
-   * Core log dispatch. Routes to buffer or directly to sheet based on
-   * whether buffering is enabled and if the level should bypass the buffer.
+   * Core log dispatch. Console emission and the sheet are gated by their own
+   * independent thresholds (`_level`, `_sheetLevel`), so a route can stay
+   * verbose in Cloud Logging while only surfacing warnings and up on the
+   * sheet. Routes to buffer or directly to sheet based on whether buffering
+   * is enabled and if the level should bypass the buffer.
    */
   private _log(level: GasLoggerLevel, msg: string, meta?: GasLoggerMeta): void {
-    if (!this._isEnabled(level)) return;
+    const logToConsole = this._meetsLevel(level, this._level);
+    const logToSheet =
+      !!this._sheet && this._meetsLevel(level, this._sheetLevel);
+
+    if (!logToConsole && !logToSheet) return;
 
     const mergedMeta = this._mergeMeta(meta);
 
-    this._emit(level, msg, mergedMeta);
+    if (logToConsole) this._emit(level, msg, mergedMeta);
 
-    if (!this._sheet) return;
+    if (!this._sheet || !logToSheet) return;
 
     const row = this._toRow(level, msg, mergedMeta);
+
     const flushThreshold = this._flushThreshold;
     const shouldBuffer =
       flushThreshold !== null && !this._bypassBufferLevels.has(level);
@@ -260,13 +272,15 @@ class GasLogger {
   /**
    * Creates a child logger that merges the given bindings into the meta
    * of every subsequent log call. Reuses the parent's already-resolved
-   * sheet and buffer.
+   * sheet and buffer. `overrides.level`/`overrides.sheetLevel` scope the
+   * child to its own thresholds without affecting the parent.
    */
-  child(bindings?: GasLoggerMeta) {
+  child(bindings?: GasLoggerMeta, overrides: GasLoggerChildOverrides = {}) {
     /** @type {GasLogger} */
-    const child: GasLogger = Object.create(GasLogger.prototype);
+    const child = Object.create(GasLogger.prototype);
 
-    child._level = this._level;
+    child._level = overrides.level || this._level;
+    child._sheetLevel = overrides.sheetLevel || this._sheetLevel;
     child._sheetConfig = this._sheetConfig;
     child._sheet = this._sheet;
     child._bindings = { ...this._bindings, ...bindings };
