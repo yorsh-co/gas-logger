@@ -11,8 +11,10 @@ interface GasLoggerSheetConfig {
   sheetName?: string;
 }
 interface GasLoggerOptions {
-  /** Minimum level to emit. @default 'info' */
+  /** Minimum level to emit to the console/execution log. @default 'info' */
   level?: GasLoggerLevel;
+  /** Minimum level to write to the sheet. @default the `level` value */
+  sheetLevel?: GasLoggerLevel;
   sheetConfig?: GasLoggerSheetConfig;
   /** Fields merged into the meta of every log call made by this logger (and its children). */
   bindings?: GasLoggerMeta;
@@ -20,4 +22,9 @@ interface GasLoggerOptions {
   flushThreshold?: number;
   /** Levels that skip the buffer and are appended to the sheet immediately. */
   bypassBufferLevels?: GasLoggerLevel[];
+}
+/** Per-child threshold overrides accepted by `GasLogger.child()`. */
+interface GasLoggerChildOverrides {
+  level?: GasLoggerLevel;
+  sheetLevel?: GasLoggerLevel;
 }

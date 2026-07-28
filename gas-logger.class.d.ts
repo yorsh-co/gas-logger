@@ -4,6 +4,7 @@
 declare class GasLogger {
   private _level;
   private _sheetConfig;
+  private _sheetLevel;
   private _sheet;
   private _bindings;
   private _buffer;
@@ -41,10 +42,9 @@ declare class GasLogger {
    */
   private _emit;
   /**
-   * Checks if the requested log level is in enable according to the instance's
-   * _level property.
+   * Checks whether `level` meets the given threshold.
    */
-  private _isEnabled;
+  private _meetsLevel;
   /**
    * Merges this logger's bound fields into a call's meta. Returns meta
    * unchanged when there are no bindings, so plain-message calls on the
@@ -57,16 +57,20 @@ declare class GasLogger {
    */
   private _flushBuffer;
   /**
-   * Core log dispatch. Routes to buffer or directly to sheet based on
-   * whether buffering is enabled and if the level should bypass the buffer.
+   * Core log dispatch. Console emission and the sheet are gated by their own
+   * independent thresholds (`_level`, `_sheetLevel`), so a route can stay
+   * verbose in Cloud Logging while only surfacing warnings and up on the
+   * sheet. Routes to buffer or directly to sheet based on whether buffering
+   * is enabled and if the level should bypass the buffer.
    */
   private _log;
   /**
    * Creates a child logger that merges the given bindings into the meta
    * of every subsequent log call. Reuses the parent's already-resolved
-   * sheet and buffer.
+   * sheet and buffer. `overrides.level`/`overrides.sheetLevel` scope the
+   * child to its own thresholds without affecting the parent.
    */
-  child(bindings?: GasLoggerMeta): GasLogger;
+  child(bindings?: GasLoggerMeta, overrides?: GasLoggerChildOverrides): any;
   trace(msg: string, meta?: GasLoggerMeta): void;
   debug(msg: string, meta?: GasLoggerMeta): void;
   info(msg: string, meta?: GasLoggerMeta): void;
