@@ -16,9 +16,10 @@
 - Six log levels (`trace` < `debug` < `info` < `warn` < `error` < `fatal`) with a configurable minimum `level`
 - Structured console output — feeds Cloud Logging with a severity and, when `meta` is present, a `jsonPayload`
 - Optional Google Sheets sink: pass `spreadsheet`, `spreadsheetUrl`, `spreadsheetId`, or `useActiveSpreadsheet` in `sheetConfig` to also append each entry as a row
+- Independent `sheetLevel` threshold — e.g. stay verbose in Cloud Logging while only writing `warn`+ to the sheet
 - Auto-creates the target sheet if it doesn't exist yet, with a frozen, bold header row and alternating row banding
 - Row buffering via `flushThreshold`, with `bypassBufferLevels` for levels (e.g. `error`, `fatal`) that should always write through immediately
-- Child loggers (`logger.child(bindings)`) that merge bound fields into every subsequent call's `meta`
+- Child loggers (`logger.child(bindings, overrides)`) that merge bound fields into every subsequent call's `meta`, optionally scoped to their own `level`/`sheetLevel`
 - Written in TypeScript; ships compiled `.js` plus matching `.d.ts` files, so no build step is required to consume it, TS or not
 - No external dependencies beyond built-in Apps Script services
 
@@ -159,7 +160,7 @@ logger.error('Failed to save record', { recordId: 42 });
 logger.fatal('Unrecoverable state', { reason: 'quota exceeded' });
 ```
 
-Only calls at or above the configured `level` are emitted — with the default `'info'` level, `trace` and `debug` calls are silently dropped.
+Only calls at or above the configured `level` are emitted — with the default `'info'` level, `trace` and `debug` calls are silently dropped. `level` gates console output; the sheet sink (if configured) is gated by `sheetLevel` instead — see [Different Levels per Sink](#different-levels-per-sink).
 
 ### Log to a Sheet
 
@@ -176,6 +177,21 @@ Pass exactly one of `spreadsheet`, `spreadsheetUrl`, `spreadsheetId`, or `useAct
 
 > **Note:**
 > Omitting `sheetConfig` entirely disables the sheet sink — logs still go to `console`.
+
+### Different Levels per Sink
+
+```js
+const logger = new GasLogger({
+  level: 'info', // console/Cloud Logging threshold
+  sheetLevel: 'warn', // sheet threshold
+  sheetConfig: { useActiveSpreadsheet: true, sheetName: 'App Logs' },
+});
+
+logger.info('Polling for status'); // console only — below sheetLevel
+logger.warn('Retrying after failure'); // console + sheet
+```
+
+`sheetLevel` defaults to `level` when omitted, so existing configs are unaffected. Useful for high-frequency routes (health checks, status polling) that are worth keeping in the execution log but would otherwise flood the sheet.
 
 ### Buffer Writes
 
@@ -206,15 +222,21 @@ logger.info('Order placed', { orderId: 'ORD-123', total: 49.99 });
 const requestLogger = logger.child({ reqId, userEmail });
 
 requestLogger.info('Handling request'); // meta automatically includes reqId + userEmail
+
+// scope a child to its own thresholds without touching the parent
+const pollingLogger = logger.child(
+  { route: '/status' },
+  { sheetLevel: 'warn' },
+);
 ```
 
-`child()` returns a new logger that merges the given `bindings` into the `meta` of every subsequent call, and reuses the parent's already-resolved sheet and buffer.
+`child()` returns a new logger that merges the given `bindings` into the `meta` of every subsequent call, and reuses the parent's already-resolved sheet and buffer. Pass an optional second `overrides` argument (`level`/`sheetLevel`) to scope just that child to different thresholds — e.g. a route polled continuously that should stay quiet on the sheet.
 
 ## Project Details
 
 ### Log Levels
 
-Six levels, in ascending severity: `trace` < `debug` < `info` < `warn` < `error` < `fatal`. Only calls at or above the configured `level` are emitted.
+Six levels, in ascending severity: `trace` < `debug` < `info` < `warn` < `error` < `fatal`. `level` gates console output; `sheetLevel` (defaults to `level`) independently gates the sheet sink. A call below both thresholds is a no-op.
 
 ### Console Output
 
