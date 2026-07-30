@@ -2,7 +2,7 @@
   "name": "gas-logger",
   "version": "0.0.0",
   "private": true,
-  "description": "Single-entry-point router and middleware for Google Apps Script web apps.",
+  "description": "A structured logger for Google Apps Script that writes to the execution log and, optionally, to a Google Sheet.",
   "repository": {
     "type": "git",
     "url": "https://github.com/yorsh-co/gas-logger.git"
