@@ -9,11 +9,12 @@ set -euo pipefail
 # Excluded from what ships:
 #   - types/*.js   — type-only files (interfaces/types) compile to empty
 #                    .js with nothing at runtime; only their .d.ts is useful.
-#   - internal/    — ambient peer-dependency declarations (gas-webapp.peer
-#                    .types.ts) used only so `tsc --noEmit` resolves GasError/
-#                    GasLogger locally. Shipping these would collide with the
-#                    real gas-error/gas-logger packages once a consumer
-#                    subtrees both — never emit .js or .d.ts for this dir.
+#   - internal/    — ambient peer-dependency declarations (gas-*.peer
+#                    .types.ts) used only so `tsc --noEmit` resolves external
+#                    dependency (like GasError and GasLogger in GasWebApp)
+#                    types locally. Shipping these would collide with the
+#                    real gas-* packages once a consumer subtrees both —
+#                    never emit .js or .d.ts for this dir.
 
 VERSION=$(node --input-type=module -e "console.log((await import('./package.json', { with: { type: 'json' } })).default.version)")
 WORKTREE_DIR=.worktrees/dist
