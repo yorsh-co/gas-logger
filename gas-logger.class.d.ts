@@ -70,7 +70,10 @@ declare class GasLogger {
    * sheet and buffer. `overrides.level`/`overrides.sheetLevel` scope the
    * child to its own thresholds without affecting the parent.
    */
-  child(bindings?: GasLoggerMeta, overrides?: GasLoggerChildOverrides): any;
+  child(
+    bindings?: GasLoggerMeta,
+    overrides?: GasLoggerChildOverrides,
+  ): GasLogger;
   trace(msg: string, meta?: GasLoggerMeta): void;
   debug(msg: string, meta?: GasLoggerMeta): void;
   info(msg: string, meta?: GasLoggerMeta): void;

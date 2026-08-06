@@ -204,7 +204,6 @@ class GasLogger {
    * child to its own thresholds without affecting the parent.
    */
   child(bindings, overrides = {}) {
-    /** @type {GasLogger} */
     const child = Object.create(GasLogger.prototype);
     child._level = overrides.level || this._level;
     child._sheetLevel = overrides.sheetLevel || this._sheetLevel;
