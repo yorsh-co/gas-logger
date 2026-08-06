@@ -226,7 +226,9 @@ class GasLogger {
       .getRange(startRow, 1, this._buffer.length, 4)
       .setValues(this._buffer);
 
-    this._buffer = [];
+    // Truncate in place: child loggers share this array by reference, so
+    // rebinding would leave them holding the already-written rows.
+    this._buffer.length = 0;
   }
 
   /**
