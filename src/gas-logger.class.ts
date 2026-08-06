@@ -275,8 +275,10 @@ class GasLogger {
    * sheet and buffer. `overrides.level`/`overrides.sheetLevel` scope the
    * child to its own thresholds without affecting the parent.
    */
-  child(bindings?: GasLoggerMeta, overrides: GasLoggerChildOverrides = {}) {
-    /** @type {GasLogger} */
+  child(
+    bindings?: GasLoggerMeta,
+    overrides: GasLoggerChildOverrides = {},
+  ): GasLogger {
     const child = Object.create(GasLogger.prototype);
 
     child._level = overrides.level || this._level;
