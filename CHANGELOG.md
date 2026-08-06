@@ -2,6 +2,18 @@
 
 ---
 
+## [1.0.2] - 2026-08-06
+
+### Fixed
+
+- Clear the row buffer in place on flush, so child loggers sharing the parent's buffer no longer re-write rows that were already written to the sheet
+
+### Changed
+
+- Annotate the object created in `child(...)` as `GasLogger`, so field assignments are type-checked instead of passing through `Object.create`'s `any`
+
+---
+
 ## [1.0.1] - 2026-08-06
 
 ### Fixed
