@@ -4,7 +4,9 @@ import eslintConfigPrettier from 'eslint-config-prettier';
 import globals from 'globals';
 
 export default tseslint.config(
-  { ignores: ['dist/**', '.worktrees/**'] },
+  // peer/ holds ambient declarations for consumers to copy; it's outside
+  // tsconfig's `include`, so project-based linting can't resolve it.
+  { ignores: ['dist/**', '.worktrees/**', 'peer/**'] },
 
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
