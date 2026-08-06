@@ -142,8 +142,8 @@ src/lib/gas-logger/
 > ```json
 > {
 >   "filePushOrder": [
->     "dist/lib/gas-logger/module/gas-logger.constants.js",
->     "dist/lib/gas-logger/module/gas-logger.class.js"
+>     "dist/lib/gas-logger/gas-logger.constants.js",
+>     "dist/lib/gas-logger/gas-logger.class.js"
 >   ]
 > }
 > ```
