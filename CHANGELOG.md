@@ -2,6 +2,18 @@
 
 ---
 
+## [1.0.1] - 2026-08-06
+
+### Fixed
+
+- Set `child(...)` return type explicitly to `GasLogger`
+
+### Docs
+
+- Correct paths in `.clasp.json` `filePushOrder` example in README.md
+
+---
+
 ## [1.0.0] - 2026-07-30
 
 ### Added
