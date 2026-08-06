@@ -281,7 +281,7 @@ class GasLogger {
     bindings?: GasLoggerMeta,
     overrides: GasLoggerChildOverrides = {},
   ): GasLogger {
-    const child = Object.create(GasLogger.prototype);
+    const child: GasLogger = Object.create(GasLogger.prototype);
 
     child._level = overrides.level || this._level;
     child._sheetLevel = overrides.sheetLevel || this._sheetLevel;
