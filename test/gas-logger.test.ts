@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadGasLogger, type GasLoggerTestOptions } from './harness';
 import { FakeSheet, FakeSpreadsheet } from './mocks';
 
@@ -163,7 +163,7 @@ describe('buffering', () => {
     expect(sheet.appendRow).not.toHaveBeenCalled();
   });
 
-  it('appends bypass levels immediately', () => {
+  it('writes bypass levels immediately', () => {
     const { mocks, logger } = setup({
       flushThreshold: 10,
       bypassBufferLevels: ['error'],
@@ -172,7 +172,7 @@ describe('buffering', () => {
     logger.error('now');
     const sheet = logSheet(mocks.activeSpreadsheet);
 
-    expect(sheet.appendRow).toHaveBeenCalledTimes(1);
+    expect(sheet.appendRow).not.toHaveBeenCalled();
     expect(dataRows(sheet)).toEqual([['error', 'now', '']]);
   });
 
@@ -285,6 +285,21 @@ describe('sheet resolution', () => {
     const sheet = logSheet(mocks.activeSpreadsheet);
     expect(sheet.values[0]).toEqual(HEADER);
     expect(sheet.setFrozenRows).toHaveBeenCalledWith(1);
+  });
+
+  it('applies banding and the bold header to the log columns only', () => {
+    const { mocks, logger } = setup();
+
+    logger.info('msg');
+
+    const sheet = logSheet(mocks.activeSpreadsheet);
+    expect(sheet.maxColumns).toBeGreaterThan(HEADER.length);
+    expect(sheet.calls.applyRowBanding).toEqual([
+      expect.objectContaining({ col: 1, numCols: HEADER.length }),
+    ]);
+    expect(sheet.calls.setFontWeight).toEqual([
+      expect.objectContaining({ col: 1, numRows: 1, numCols: HEADER.length }),
+    ]);
   });
 });
 
@@ -455,6 +470,271 @@ describe('sheet creation lock', () => {
       expect.objectContaining({
         message: expect.stringContaining('script lock'),
       }),
+    );
+  });
+});
+
+/** Cells of the given column across every populated row. */
+function column(sheet: FakeSheet, index: number): string[] {
+  return sheet.values.map((row) => row[index] ?? '');
+}
+
+/** Loads a logger bound to a pre-created sheet. */
+function setupOnSheet(options: GasLoggerTestOptions = {}) {
+  const { GasLogger, mocks } = loadGasLogger();
+  const sheet = mocks.activeSpreadsheet.insertSheet('log');
+  const logger = new GasLogger({
+    sheetConfig: { useActiveSpreadsheet: true, sheetName: 'log' },
+    ...options,
+  });
+  return { mocks, sheet, logger };
+}
+
+/** Like `setupOnSheet`, with buffering enabled unless overridden. */
+function setupBuffered(options: GasLoggerTestOptions = {}) {
+  return setupOnSheet({ flushThreshold: 10, ...options });
+}
+
+/** `[GasLogger]` reports sent to `console.error`. */
+function reports(mocks: ReturnType<typeof loadGasLogger>['mocks']) {
+  return mocks.console.error.mock.calls.filter(
+    ([first]) => typeof first === 'string' && first.startsWith('[GasLogger]'),
+  );
+}
+
+describe('flush locking', () => {
+  it('holds and releases the script lock around the write', () => {
+    const { mocks, logger } = setupBuffered({ flushThreshold: 1 });
+
+    logger.info('msg');
+
+    expect(mocks.lock.tryLock).toHaveBeenCalledWith(10000);
+    expect(mocks.lock.releaseLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the lock when setValues throws', () => {
+    const { mocks, sheet, logger } = setupBuffered();
+    sheet.getRange = () => {
+      throw new Error('boom');
+    };
+
+    logger.info('msg');
+    expect(() => logger.flush()).not.toThrow();
+
+    expect(mocks.lock.releaseLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a lock timeout with the row count, drops the rows and keeps the sink enabled', () => {
+    const { mocks, sheet, logger } = setupBuffered();
+    mocks.lock.tryLock.mockReturnValueOnce(false);
+
+    logger.info('a');
+    logger.info('b');
+    expect(() => logger.flush()).not.toThrow();
+
+    expect(mocks.console.error).toHaveBeenCalledExactlyOnceWith(
+      '[GasLogger] Failed to write 2 row(s) to the log sheet.',
+      expect.objectContaining({
+        message: expect.stringContaining('script lock'),
+      }),
+    );
+    expect(mocks.lock.releaseLock).not.toHaveBeenCalled();
+    expect(column(sheet, 2)).toEqual([]);
+
+    logger.info('c');
+    logger.flush();
+
+    expect(column(sheet, 2)).toEqual(['c']);
+  });
+
+  it('does not re-write the rows of a failed flush later', () => {
+    const { mocks, sheet, logger } = setupBuffered();
+    const getRange = sheet.getRange;
+    sheet.getRange = () => {
+      throw new Error('quota exceeded');
+    };
+
+    logger.info('lost');
+    logger.flush();
+    sheet.getRange = getRange;
+    logger.info('kept');
+    logger.flush();
+
+    expect(reports(mocks)).toHaveLength(1);
+    expect(column(sheet, 2)).toEqual(['kept']);
+  });
+
+  it('takes no lock for individual appends', () => {
+    const { mocks, sheet, logger } = setupOnSheet();
+
+    logger.info('msg');
+
+    expect(sheet.appendRow).toHaveBeenCalledTimes(1);
+    expect(mocks.LockService.getScriptLock).not.toHaveBeenCalled();
+  });
+});
+
+describe('sheet capacity', () => {
+  it('grows a full sheet instead of throwing', () => {
+    const { sheet, logger } = setupBuffered({ flushThreshold: 2 });
+    sheet.values = [['h'], ['x'], ['y']];
+    sheet.maxRows = 3;
+
+    expect(() => {
+      logger.info('a');
+      logger.info('b');
+    }).not.toThrow();
+
+    expect(column(sheet, 2).slice(3)).toEqual(['a', 'b']);
+  });
+
+  it('inserts exactly the missing rows after the last grid row', () => {
+    const { sheet, logger } = setupBuffered({ flushThreshold: 2 });
+    const insert = vi.spyOn(sheet, 'insertRowsAfter');
+    sheet.values = [['h'], ['x'], ['y']];
+    sheet.maxRows = 3;
+
+    logger.info('a');
+    logger.info('b');
+
+    expect(insert).toHaveBeenCalledExactlyOnceWith(3, 2);
+    expect(sheet.maxRows).toBe(5);
+  });
+
+  it('inserts only the shortfall when the batch partly fits', () => {
+    const { sheet, logger } = setupBuffered({ flushThreshold: 3 });
+    const insert = vi.spyOn(sheet, 'insertRowsAfter');
+    sheet.values = [['h'], ['x']];
+    sheet.maxRows = 3;
+
+    logger.info('a');
+    logger.info('b');
+    logger.info('c');
+
+    expect(insert).toHaveBeenCalledExactlyOnceWith(3, 2);
+    expect(column(sheet, 2).slice(2)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('does not insert rows when the batch fits', () => {
+    const { sheet, logger } = setupBuffered({ flushThreshold: 2 });
+    const insert = vi.spyOn(sheet, 'insertRowsAfter');
+
+    logger.info('a');
+    logger.info('b');
+
+    expect(insert).not.toHaveBeenCalled();
+  });
+});
+
+describe('bypass ordering', () => {
+  it('writes a bypass entry after the pending rows in a single batch', () => {
+    const { sheet, logger } = setupBuffered({ bypassBufferLevels: ['error'] });
+
+    logger.info('a');
+    logger.info('b');
+    logger.error('c');
+
+    expect(column(sheet, 2)).toEqual(['a', 'b', 'c']);
+    expect(sheet.calls.setValues).toEqual([
+      { row: 1, col: 1, numRows: 3, numCols: 4 },
+    ]);
+    expect(sheet.appendRow).not.toHaveBeenCalled();
+  });
+
+  it('writes a bypass entry as a one-row batch when the buffer is empty', () => {
+    const { sheet, logger } = setupBuffered({ bypassBufferLevels: ['error'] });
+
+    logger.error('c');
+
+    expect(sheet.calls.setValues).toEqual([
+      { row: 1, col: 1, numRows: 1, numCols: 4 },
+    ]);
+    expect(sheet.appendRow).not.toHaveBeenCalled();
+  });
+
+  it('takes the script lock for a bypass entry', () => {
+    const { mocks, logger } = setupBuffered({ bypassBufferLevels: ['error'] });
+
+    logger.error('c');
+
+    expect(mocks.lock.tryLock).toHaveBeenCalledWith(10000);
+    expect(mocks.lock.releaseLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('flushes the shared buffer when a child logs a bypass entry', () => {
+    const { sheet, logger } = setupBuffered({ bypassBufferLevels: ['error'] });
+    const child = logger.child({ b: 2 });
+
+    logger.info('a');
+    child.error('c');
+
+    expect(column(sheet, 2)).toEqual(['a', 'c']);
+    expect(sheet.calls.setValues).toHaveLength(1);
+
+    logger.flush();
+    expect(column(sheet, 2)).toEqual(['a', 'c']);
+  });
+
+  it('reports pending and bypass rows together when the batch fails', () => {
+    const { mocks, sheet, logger } = setupBuffered({
+      bypassBufferLevels: ['error'],
+    });
+    sheet.getRange = () => {
+      throw new Error('boom');
+    };
+
+    logger.info('a');
+    expect(() => logger.error('c')).not.toThrow();
+
+    expect(mocks.console.error).toHaveBeenCalledWith(
+      '[GasLogger] Failed to write 2 row(s) to the log sheet.',
+      expect.any(Error),
+    );
+  });
+});
+
+describe('sheet write failures', () => {
+  it('reports a failed append without throwing', () => {
+    const { mocks, sheet, logger } = setupOnSheet();
+    const error = new Error('quota exceeded');
+    sheet.appendRow.mockImplementation(() => {
+      throw error;
+    });
+
+    expect(() => logger.error('msg')).not.toThrow();
+
+    expect(mocks.console.error).toHaveBeenCalledWith(
+      '[GasLogger] Failed to write 1 row(s) to the log sheet.',
+      error,
+    );
+  });
+
+  it('keeps writing after a failed append', () => {
+    const { sheet, logger } = setupOnSheet();
+    sheet.appendRow.mockImplementationOnce(() => {
+      throw new Error('transient');
+    });
+
+    logger.info('lost');
+    logger.info('kept');
+
+    expect(column(sheet, 2)).toEqual(['kept']);
+  });
+
+  it('reports a failed batch with its row count', () => {
+    const { mocks, sheet, logger } = setupBuffered({ flushThreshold: 3 });
+    const error = new Error('boom');
+    sheet.getRange = () => {
+      throw error;
+    };
+
+    logger.info('a');
+    logger.info('b');
+    expect(() => logger.info('c')).not.toThrow();
+
+    expect(mocks.console.error).toHaveBeenCalledWith(
+      '[GasLogger] Failed to write 3 row(s) to the log sheet.',
+      error,
     );
   });
 });

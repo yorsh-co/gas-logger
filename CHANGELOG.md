@@ -10,6 +10,11 @@
 - Reuse a single default `gas-log` tab instead of creating `gas-log-0`, `gas-log-1`, ... on every new logger
 - Create the log sheet inside the script lock and re-check for it after acquiring the lock, so concurrent first runs no longer fail on a duplicate sheet name
 - Treat an empty `sheetConfig` as enabling the sheet sink on the active spreadsheet, and throw at construction for `useActiveSpreadsheet: false` without another source
+- Write buffered batches under the script lock, so concurrent flushes no longer overwrite each other's rows
+- Add rows to the sheet when a batch doesn't fit, instead of failing when the sheet has no empty rows left
+- Write a `bypassBufferLevels` entry together with any pending buffered rows in one locked batch, so the sheet keeps chronological order
+- Report sheet write failures to `console.error` and drop the affected rows instead of throwing from the logger; the buffer is always cleared so a failed batch is never re-written
+- Apply row banding and the bold header to the four log columns only, instead of every column in the sheet
 - Correct the `_resolveSheet` JSDoc and a typo in the source validation docs
 
 ### Added
