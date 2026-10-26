@@ -70,18 +70,55 @@ describe('level gating', () => {
 
 describe('console output', () => {
   it.each([
-    ['trace', 'info'],
-    ['debug', 'info'],
     ['info', 'info'],
     ['warn', 'warn'],
     ['error', 'error'],
-    ['fatal', 'error'],
-  ] as const)('maps %s to console.%s', (level, method) => {
+  ] as const)('maps %s to console.%s as a plain string', (level, method) => {
     const { mocks, logger } = setup({ level: 'trace' });
 
     logger[level]('msg');
 
     expect(mocks.console[method]).toHaveBeenCalledExactlyOnceWith('msg');
+  });
+
+  it.each([
+    ['trace', 'info'],
+    ['debug', 'info'],
+    ['fatal', 'error'],
+  ] as const)(
+    'maps %s to console.%s with the real level in the payload',
+    (level, method) => {
+      const { mocks, logger } = setup({ level: 'trace' });
+
+      logger[level]('msg');
+
+      expect(mocks.console[method]).toHaveBeenCalledExactlyOnceWith({
+        message: 'msg',
+        level,
+      });
+    },
+  );
+
+  it('does not let meta override the message and level', () => {
+    const { mocks, logger } = setup();
+
+    logger.info('real', { message: 'x', level: 'y' });
+
+    expect(mocks.console.info).toHaveBeenCalledWith({
+      message: 'real',
+      level: 'info',
+    });
+  });
+
+  it('does not let child bindings override the message and level', () => {
+    const { mocks, logger } = setup();
+
+    logger.child({ message: 'x', level: 'y' }).info('real');
+
+    expect(mocks.console.info).toHaveBeenCalledWith({
+      message: 'real',
+      level: 'info',
+    });
   });
 
   it('passes meta as a structured object', () => {
@@ -736,5 +773,208 @@ describe('sheet write failures', () => {
       '[GasLogger] Failed to write 3 row(s) to the log sheet.',
       error,
     );
+  });
+});
+
+describe('meta normalization', () => {
+  it('replaces circular references with "[Circular]"', () => {
+    const { mocks, sheet, logger } = setupOnSheet();
+    const meta: Record<string, unknown> = { id: 1 };
+    meta.self = meta;
+
+    expect(() => logger.info('msg', meta)).not.toThrow();
+
+    expect(JSON.parse(column(sheet, 3)[0] ?? '')).toEqual({
+      id: 1,
+      self: '[Circular]',
+    });
+    expect(mocks.console.info).toHaveBeenCalledWith({
+      message: 'msg',
+      level: 'info',
+      id: 1,
+      self: '[Circular]',
+    });
+  });
+
+  it('replaces a circular reference nested in an array', () => {
+    const { sheet, logger } = setupOnSheet();
+    const list: unknown[] = [1];
+    list.push({ list });
+
+    logger.info('msg', { list });
+
+    expect(JSON.parse(column(sheet, 3)[0] ?? '')).toEqual({
+      list: [1, { list: '[Circular]' }],
+    });
+  });
+
+  it('serializes an object referenced twice without a cycle', () => {
+    const { sheet, logger } = setupOnSheet();
+    const shared = { a: 1 };
+
+    logger.info('msg', { first: shared, second: shared, both: [shared] });
+
+    expect(JSON.parse(column(sheet, 3)[0] ?? '')).toEqual({
+      first: { a: 1 },
+      second: { a: 1 },
+      both: [{ a: 1 }],
+    });
+  });
+
+  it('serializes Error values in meta for the sheet and the console', () => {
+    const { mocks, sheet, logger } = setupOnSheet();
+
+    logger.error('msg', { err: new Error('boom') });
+
+    const parsed = JSON.parse(column(sheet, 3)[0] ?? '');
+    expect(parsed.err).toEqual({
+      name: 'Error',
+      message: 'boom',
+      stack: expect.stringContaining('boom'),
+    });
+    expect(mocks.console.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        err: expect.objectContaining({ name: 'Error', message: 'boom' }),
+      }),
+    );
+  });
+
+  it('keeps extra enumerable properties and normalizes a nested cause', () => {
+    const { sheet, logger } = setupOnSheet();
+    const err = Object.assign(new TypeError('outer'), {
+      code: 'E_FAIL',
+      cause: new Error('inner'),
+    });
+
+    logger.error('msg', { err });
+
+    const parsed = JSON.parse(column(sheet, 3)[0] ?? '');
+    expect(parsed.err).toMatchObject({
+      name: 'TypeError',
+      message: 'outer',
+      code: 'E_FAIL',
+      cause: { name: 'Error', message: 'inner' },
+    });
+  });
+
+  it('serializes an Error passed through child bindings', () => {
+    const { sheet, logger } = setupOnSheet();
+
+    logger.child({ err: new Error('bound') }).info('msg');
+
+    expect(JSON.parse(column(sheet, 3)[0] ?? '').err).toMatchObject({
+      message: 'bound',
+    });
+  });
+
+  it('serializes bigint values as strings', () => {
+    const { mocks, sheet, logger } = setupOnSheet();
+
+    expect(() => logger.info('msg', { big: 10n ** 20n })).not.toThrow();
+
+    expect(JSON.parse(column(sheet, 3)[0] ?? '')).toEqual({
+      big: '100000000000000000000',
+    });
+    expect(mocks.console.info).toHaveBeenCalledWith(
+      expect.objectContaining({ big: '100000000000000000000' }),
+    );
+  });
+
+  it('keeps dates as dates', () => {
+    const { sheet, logger } = setupOnSheet();
+    const at = new Date('2026-01-02T03:04:05.000Z');
+
+    logger.info('msg', { at });
+
+    expect(JSON.parse(column(sheet, 3)[0] ?? '')).toEqual({
+      at: '2026-01-02T03:04:05.000Z',
+    });
+  });
+});
+
+describe('sheet cell safety', () => {
+  const LIMIT = 50000;
+
+  it('leaves an ordinary message unchanged', () => {
+    const { sheet, logger } = setupOnSheet();
+
+    logger.info('hello');
+
+    expect(column(sheet, 2)).toEqual(['hello']);
+  });
+
+  it.each(['=', '+', '-', '@'])(
+    'stores a message starting with "%s" as text',
+    (prefix) => {
+      const { sheet, logger } = setupOnSheet();
+
+      logger.info(`${prefix}SUM(A1)`);
+
+      expect(column(sheet, 2)).toEqual([`'${prefix}SUM(A1)`]);
+    },
+  );
+
+  it('stores a negative-number-like message as text', () => {
+    const { sheet, logger } = setupOnSheet();
+
+    logger.info('-5');
+
+    expect(column(sheet, 2)).toEqual(["'-5"]);
+  });
+
+  it('does not prefix a message already starting with a quote', () => {
+    const { sheet, logger } = setupOnSheet();
+
+    logger.info("'quoted");
+
+    expect(column(sheet, 2)).toEqual(["'quoted"]);
+  });
+
+  it('truncates a long message to the cell limit with a marker', () => {
+    const { sheet, logger } = setupOnSheet();
+
+    logger.info('a'.repeat(LIMIT + 10));
+
+    const cell = column(sheet, 2)[0] ?? '';
+    expect(cell).toHaveLength(LIMIT);
+    expect(cell.endsWith('…[truncated]')).toBe(true);
+  });
+
+  it('keeps a message of exactly the limit untouched', () => {
+    const { sheet, logger } = setupOnSheet();
+
+    logger.info('a'.repeat(LIMIT));
+
+    expect(column(sheet, 2)[0]).toBe('a'.repeat(LIMIT));
+  });
+
+  it('truncates meta_json to the cell limit with a marker', () => {
+    const { sheet, logger } = setupOnSheet();
+
+    logger.info('msg', { blob: 'b'.repeat(LIMIT * 2) });
+
+    const cell = column(sheet, 3)[0] ?? '';
+    expect(cell).toHaveLength(LIMIT);
+    expect(cell.endsWith('…[truncated]')).toBe(true);
+  });
+
+  it('keeps an escaped and truncated message within the limit', () => {
+    const { sheet, logger } = setupOnSheet();
+
+    logger.info(`=${'a'.repeat(LIMIT)}`);
+
+    const cell = column(sheet, 2)[0] ?? '';
+    expect(cell.startsWith("'=")).toBe(true);
+    expect(cell).toHaveLength(LIMIT);
+    expect(cell.endsWith('…[truncated]')).toBe(true);
+  });
+
+  it('sends the full untruncated message to the console', () => {
+    const { mocks, logger } = setupOnSheet();
+    const message = `=${'a'.repeat(LIMIT * 2)}`;
+
+    logger.info(message);
+
+    expect(mocks.console.info).toHaveBeenCalledWith(message);
   });
 });

@@ -191,7 +191,8 @@ class GasLogger {
   // =========================
 
   /**
-   * Builds a flat row for the sheet schema.
+   * Builds a flat row for the sheet schema. The message and meta cells are
+   * made safe for the sheet by `_toCell`.
    */
   private _toRow(
     level: GasLoggerLevel,
@@ -201,16 +202,82 @@ class GasLogger {
     return [
       new Date().toISOString(),
       level,
-      msg,
-      meta ? JSON.stringify(meta) : '',
+      this._toCell(msg),
+      meta ? this._toCell(JSON.stringify(meta)) : '',
     ];
+  }
+
+  /**
+   * Makes free text safe to store in a sheet cell. A leading `=`, `+`, `-`
+   * or `@` is prefixed with `'` so Sheets stores the value as text instead
+   * of evaluating it as a formula, and the result is cut, ending with a
+   * truncation marker, to fit the cell character limit.
+   */
+  private _toCell(text: string): string {
+    const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+
+    if (safe.length <= GAS_LOGGER_MAX_CELL_LENGTH) return safe;
+
+    return (
+      safe.slice(
+        0,
+        GAS_LOGGER_MAX_CELL_LENGTH - GAS_LOGGER_TRUNCATION_MARKER.length,
+      ) + GAS_LOGGER_TRUNCATION_MARKER
+    );
+  }
+
+  /**
+   * Converts a value into a JSON-safe plain copy. Errors become plain
+   * objects with their name, message, stack and own enumerable properties,
+   * bigints become strings and circular references become `'[Circular]'`.
+   * Only the ancestors of the current value are tracked, so an object
+   * referenced twice without a cycle is serialized both times. Dates are
+   * kept as-is: JSON and the console both render them as ISO strings.
+   * @param {unknown} value
+   * @param {unknown[]} [ancestors] Objects on the path to `value`.
+   */
+  private _normalizeValue(value: unknown, ancestors: unknown[] = []): unknown {
+    if (typeof value === 'bigint') return value.toString();
+
+    if (typeof value !== 'object' || value === null) return value;
+
+    const tag = Object.prototype.toString.call(value);
+
+    if (tag === '[object Date]') return value;
+
+    if (ancestors.includes(value)) return '[Circular]';
+
+    const path = [...ancestors, value];
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this._normalizeValue(item, path));
+    }
+
+    const source =
+      tag === '[object Error]'
+        ? {
+            name: (value as Error).name,
+            message: (value as Error).message,
+            stack: (value as Error).stack,
+            ...value,
+          }
+        : (value as Record<string, unknown>);
+
+    return Object.fromEntries(
+      Object.entries(source).map(([key, entry]) => [
+        key,
+        this._normalizeValue(entry, path),
+      ]),
+    );
   }
 
   /**
    * Emits to the console service so entries feed Cloud Logging with a
    * severity and, when meta is present, a structured jsonPayload.
-   * `trace`/`fatal` have no dedicated console method, so they're emitted
-   * via `info`/`error`, with the real level kept in the payload.
+   * `trace`/`debug`/`fatal` have no console method of their own, so they're
+   * emitted via `info`/`error` and always use the payload form, which
+   * carries the real level. `message` and `level` come last so meta can't
+   * override them.
    * @param {GasLoggerLevel} level
    * @param {string} msg
    * @param {Object} [meta]
@@ -221,8 +288,8 @@ class GasLogger {
     meta?: GasLoggerMeta,
   ): void {
     const fn = GAS_LOGGER_CONSOLE_METHOD[level];
-    if (meta) {
-      console[fn]({ message: msg, level, ...meta });
+    if (meta || fn !== level) {
+      console[fn]({ ...meta, message: msg, level });
     } else {
       console[fn](msg);
     }
@@ -319,7 +386,9 @@ class GasLogger {
 
     if (!logToConsole && !logToSheet) return;
 
-    const mergedMeta = this._mergeMeta(meta);
+    const merged = this._mergeMeta(meta);
+    const mergedMeta =
+      merged && (this._normalizeValue(merged) as GasLoggerMeta);
 
     if (logToConsole) this._emit(level, msg, mergedMeta);
 
