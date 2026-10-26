@@ -2,6 +2,19 @@
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- Vitest test suite with in-memory Apps Script service mocks, covering current behaviour and documenting known defects as expected failures
+
+### Changed
+
+- ESLint config uses `defineConfig` from `eslint/config` and drops the stale `no-undef` comment
+- `npm run typecheck` and ESLint also cover `test/` through `tsconfig.test.json`; `npm run check` runs the test suite
+
+---
+
 ## [1.0.2] - 2026-08-06
 
 ### Fixed
