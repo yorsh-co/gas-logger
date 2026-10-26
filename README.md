@@ -198,7 +198,9 @@ const logger = new GasLogger({
 });
 ```
 
-Pass exactly one of `spreadsheet`, `spreadsheetUrl`, `spreadsheetId`, or `useActiveSpreadsheet` in `sheetConfig` — omitting all four defaults to `useActiveSpreadsheet`. If `sheetName` doesn't already exist, `GasLogger` creates it with a frozen, bold header row (`timestamp`, `level`, `message`, `meta_json`) and alternating row banding.
+Pass exactly one of `spreadsheet`, `spreadsheetUrl`, `spreadsheetId`, or `useActiveSpreadsheet` in `sheetConfig` — omitting all four (including `sheetConfig: {}`) defaults to `useActiveSpreadsheet`. If `sheetName` is omitted, the `gas-log` tab is used. If the tab doesn't already exist, `GasLogger` creates it, while holding the script lock, with a frozen, bold header row (`timestamp`, `level`, `message`, `meta_json`) and alternating row banding.
+
+The sheet is resolved on the first write, not in the constructor. Invalid configuration (more than one source, or `useActiveSpreadsheet: false` with no other source) throws when the logger is constructed. Errors that occur while accessing the spreadsheet (e.g. a bad id, no active spreadsheet or a lock timeout) are reported once to `console.error` and disable the sheet sink for the rest of that execution — logging never throws because of the sheet, and console output is unaffected.
 
 > [!NOTE]
 > Omitting `sheetConfig` entirely disables the sheet sink — logs still go to `console`.
@@ -243,7 +245,7 @@ logger.info('Order placed', { orderId: 'ORD-123', total: 49.99 });
 
 ### Child Loggers
 
-`child()` returns a new logger that merges the given `bindings` into the `meta` of every subsequent call, and reuses the parent's already-resolved sheet and buffer. Pass an optional second `overrides` argument (`level`/`sheetLevel`) to scope just that child to different thresholds — e.g. a route polled continuously that should stay quiet on the sheet.
+`child()` returns a new logger that merges the given `bindings` into the `meta` of every subsequent call, and shares the parent's sheet and buffer — whichever logger writes first resolves the sheet for both. Pass an optional second `overrides` argument (`level`/`sheetLevel`) to scope just that child to different thresholds — e.g. a route polled continuously that should stay quiet on the sheet.
 
 ```js
 const requestLogger = logger.child({ reqId, userEmail });
@@ -269,7 +271,7 @@ Every log call is emitted to the Apps Script `console` service, which feeds Clou
 
 ### Sheet Output
 
-When `sheetConfig` is provided, each log call is also appended as a row (`timestamp`, `level`, `message`, `meta_json`) to the resolved sheet — either buffered (see [Buffer Writes](#buffer-writes)) or written immediately, one `appendRow` per call, if no `flushThreshold` is set.
+When `sheetConfig` is provided, each log call is also appended as a row (`timestamp`, `level`, `message`, `meta_json`) to the log sheet (`gas-log` unless `sheetName` is set) — either buffered (see [Buffer Writes](#buffer-writes)) or written immediately, one `appendRow` per call, if no `flushThreshold` is set.
 
 ## License
 
