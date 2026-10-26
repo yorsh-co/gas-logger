@@ -20,7 +20,7 @@
 - Optional Google Sheets sink: pass `spreadsheet`, `spreadsheetUrl`, `spreadsheetId`, or `useActiveSpreadsheet` in `sheetConfig` to also append each entry as a row in a dedicated log sheet tab
 - Independent `sheetLevel` threshold — e.g. stay verbose in Cloud Logging while only writing `warn`+ to the sheet
 - Auto-creates the target sheet if it doesn't exist yet, with a frozen, bold header row and alternating row colors
-- Row buffering via `flushThreshold`, with `bypassBufferLevels` for levels (e.g. `error`, `fatal`) that should always write through immediately
+- Row buffering via `flushThreshold`, with `bypassBufferLevels` for levels (e.g. `error`, `fatal`) that flush the buffer immediately
 - Child loggers (`logger.child(bindings, overrides)`) that merge bound fields into every subsequent call's `meta`, optionally scoped to their own `level`/`sheetLevel`
 - Written in TypeScript; ships compiled `.js` plus matching `.d.ts` files, so no build step is required to consume it, TS or not
 - No external dependencies beyond built-in Apps Script services
@@ -134,7 +134,7 @@ src/lib/gas-logger/
 > Apps Script executes files by the order in the Apps Script editor, from top to bottom. By default, `clasp push` orders the files alphabetically, by file name. If a `GasLogger` instance is declared at runtime (as a global variable or in an IIFE) in file referencing `GasLogger` that is ordered before `gas-logger`'s own files, `clasp push` will succeed but running the project will throw:
 >
 > ```txt
-> ReferenceError: GasSheetDb is not defined
+> ReferenceError: GasLogger is not defined
 > ```
 >
 > To avoid this, add a [`filePushOrder`](https://github.com/google/clasp#filepushorder-optional) entry to your project's `.clasp.json` that pushes `gas-logger`'s module files ahead of any file that references them:
@@ -147,6 +147,8 @@ src/lib/gas-logger/
 >   ]
 > }
 > ```
+>
+> Use the path where the files land in your pushed project, e.g. `src/lib/gas-logger/...` when pushing the subtree as-is.
 >
 > Alternatively, you can manually move these files to the top of the file list in the Apps Script editor.
 
@@ -198,7 +200,9 @@ const logger = new GasLogger({
 });
 ```
 
-Pass exactly one of `spreadsheet`, `spreadsheetUrl`, `spreadsheetId`, or `useActiveSpreadsheet` in `sheetConfig` — omitting all four defaults to `useActiveSpreadsheet`. If `sheetName` doesn't already exist, `GasLogger` creates it with a frozen, bold header row (`timestamp`, `level`, `message`, `meta_json`) and alternating row banding.
+Pass exactly one of `spreadsheet`, `spreadsheetUrl`, `spreadsheetId`, or `useActiveSpreadsheet` in `sheetConfig` — omitting all four (including `sheetConfig: {}`) defaults to `useActiveSpreadsheet`. If `sheetName` is omitted, the `gas-log` tab is used. If the tab doesn't already exist, `GasLogger` creates it, while holding the script lock, with a frozen, bold header row (`timestamp`, `level`, `message`, `meta_json`) and alternating row banding.
+
+The sheet is resolved on the first write, not in the constructor. Invalid configuration (more than one source, or `useActiveSpreadsheet: false` with no other source) throws when the logger is constructed. Errors that occur while accessing the spreadsheet (e.g. a bad id, no active spreadsheet or a lock timeout) are reported once to `console.error` and disable the sheet sink for the rest of that execution — logging never throws because of the sheet, and console output is unaffected.
 
 > [!NOTE]
 > Omitting `sheetConfig` entirely disables the sheet sink — logs still go to `console`.
@@ -228,7 +232,9 @@ const logger = new GasLogger({
 });
 ```
 
-By default, every log row is appended to the sheet individually. Set `flushThreshold` to buffer rows in memory and write them in a single batch once the buffer reaches that size. Use `bypassBufferLevels` for levels that should always skip the buffer and write through immediately — e.g. so an `error` isn't lost if the script exits before the next flush.
+By default, every log row is appended to the sheet individually. Set `flushThreshold` to buffer rows in memory and write them in a single batch once the buffer reaches that size. Use `bypassBufferLevels` for levels that should never wait for the threshold — e.g. so an `error` isn't lost if the script exits before the next flush. A bypass-level entry flushes the buffer immediately, so it is written together with any pending buffered rows in one locked batch and the sheet stays in chronological order.
+
+Batched flushes hold the script lock while writing, so concurrent executions don't overwrite each other's rows, and add rows to the sheet when it is full.
 
 > [!IMPORTANT]
 > Call `logger.flush()` in a `try`/`finally` block to make sure any remaining buffered rows are written before the script ends.
@@ -239,11 +245,11 @@ By default, every log row is appended to the sheet individually. Set `flushThres
 logger.info('Order placed', { orderId: 'ORD-123', total: 49.99 });
 ```
 
-`meta` is merged into the console payload (as a structured `jsonPayload` for Cloud Logging) and, when a sheet is configured, JSON-stringified into the `meta_json` column.
+`meta` is merged into the console payload (as a structured `jsonPayload` for Cloud Logging) and, when a sheet is configured, JSON-stringified into the `meta_json` column. `Error` values are serialized as `{ name, message, stack, ...ownProperties }`, `bigint` values as strings, and circular references are replaced with `[Circular]`, so logging never throws because of the meta.
 
 ### Child Loggers
 
-`child()` returns a new logger that merges the given `bindings` into the `meta` of every subsequent call, and reuses the parent's already-resolved sheet and buffer. Pass an optional second `overrides` argument (`level`/`sheetLevel`) to scope just that child to different thresholds — e.g. a route polled continuously that should stay quiet on the sheet.
+`child()` returns a new logger that merges the given `bindings` into the `meta` of every subsequent call, and shares the parent's sheet and buffer — whichever logger writes first resolves the sheet for both. Pass an optional second `overrides` argument (`level`/`sheetLevel`) to scope just that child to different thresholds — e.g. a route polled continuously that should stay quiet on the sheet.
 
 ```js
 const requestLogger = logger.child({ reqId, userEmail });
@@ -265,11 +271,13 @@ Six levels, in ascending severity: `trace` < `debug` < `info` < `warn` < `error`
 
 ### Console Output
 
-Every log call is emitted to the Apps Script `console` service, which feeds Cloud Logging with a severity and, when `meta` is present, a structured `jsonPayload`. `trace`, `debug` and `fatal` have no dedicated `console` method, so they're emitted via `console.info`/`console.error`, with the real level kept in the payload.
+Every log call is emitted to the Apps Script `console` service, which feeds Cloud Logging with a severity and, when `meta` is present, a structured `jsonPayload`. `trace`, `debug` and `fatal` have no `console` method of their own, so they're emitted via `console.info`/`console.error` and always as a structured payload, with the real level in the payload. `message` and `level` in a structured payload always reflect the call; a `meta` or binding field with either name doesn't override them. `info`, `warn` and `error` without `meta` are emitted as a plain string. Console output is never truncated.
 
 ### Sheet Output
 
-When `sheetConfig` is provided, each log call is also appended as a row (`timestamp`, `level`, `message`, `meta_json`) to the resolved sheet — either buffered (see [Buffer Writes](#buffer-writes)) or written immediately, one `appendRow` per call, if no `flushThreshold` is set.
+When `sheetConfig` is provided, each log call is also appended as a row (`timestamp`, `level`, `message`, `meta_json`) to the log sheet (`gas-log` unless `sheetName` is set) — either buffered (see [Buffer Writes](#buffer-writes)) or written immediately, one `appendRow` per call, if no `flushThreshold` is set. The `message` and `meta_json` cells are stored as text when they start with `=`, `+`, `-` or `@` (prefixed with `'`) so Sheets never evaluates them as formulas, and are truncated to 50,000 characters (the cell limit), ending with `…[truncated]`. Unbuffered loggers use `appendRow` without the script lock, so a sheet shared with buffered loggers in other executions should use buffering consistently.
+
+Logging never throws because of a sheet write. If a write fails (e.g. the script lock times out or a quota is hit), the error is reported to `console.error` and the affected rows are dropped; later entries are still written.
 
 ## License
 

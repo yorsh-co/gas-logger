@@ -1,5 +1,17 @@
 type GasLoggerLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 type GasLoggerConsoleMethod = 'info' | 'warn' | 'error';
+/**
+ * Sheet state shared by reference between a logger and its children, so
+ * the sheet is resolved once and the buffer is common to all of them.
+ */
+interface GasLoggerSink {
+  config: GasLoggerSheetConfig;
+  /** `undefined` until resolved; `null` if resolution failed. */
+  sheet: GoogleAppsScript.Spreadsheet.Sheet | null | undefined;
+  buffer: Array<[string, string, string, string]>;
+  flushThreshold: number | null;
+  bypassBufferLevels: Set<GasLoggerLevel>;
+}
 type GasLoggerMeta = Record<string, unknown>;
 interface GasLoggerSheetConfig {
   spreadsheet?: GoogleAppsScript.Spreadsheet.Spreadsheet;
