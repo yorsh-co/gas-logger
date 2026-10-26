@@ -1,6 +1,6 @@
 {
   "name": "gas-logger",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "private": true,
   "description": "A structured logger for Google Apps Script that writes to the execution log and, optionally, to a Google Sheet.",
   "repository": {
