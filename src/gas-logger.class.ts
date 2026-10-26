@@ -3,60 +3,47 @@
  */
 class GasLogger {
   private _level: GasLoggerLevel;
-  private _sheetConfig: GasLoggerSheetConfig;
   private _sheetLevel: GasLoggerLevel;
-  private _sheet: GoogleAppsScript.Spreadsheet.Sheet | null;
   private _bindings: GasLoggerMeta;
-  private _buffer: Array<[string, string, string, string]>;
-  private _flushThreshold: number | null;
-  private _bypassBufferLevels: Set<GasLoggerLevel>;
+  private _sink: GasLoggerSink | null;
 
+  /**
+   * Validates the sheet configuration. No Apps Script service is called
+   * here: the sheet is resolved lazily on the first write.
+   * Throws if the sheet configuration is invalid.
+   */
   constructor(options: GasLoggerOptions = {}) {
     this._level = options.level || 'info';
     this._sheetLevel = options.sheetLevel || this._level;
-
-    this._sheetConfig = options.sheetConfig || ({} as GasLoggerSheetConfig);
-    this._sheet = Object.keys(this._sheetConfig).length
-      ? this._resolveSheet()
-      : null;
-
     this._bindings = options.bindings || {};
 
-    this._flushThreshold = options.flushThreshold || null;
-    this._buffer = [];
-    this._bypassBufferLevels = new Set(options.bypassBufferLevels || []);
-  }
-
-  // =========================
-  // CONSTRUCTOR HELPERS
-  // =========================
-
-  /**
-   * Resolve the spreadsheet from the provided source option.
-   * Throws if more than on source is passed in options.
-   */
-  private _resolveSheet(): GoogleAppsScript.Spreadsheet.Sheet {
-    const spreadsheet = this._resolveSpreadsheet();
-
-    const { sheetName } = this._sheetConfig;
-
-    if (sheetName) {
-      const sheet = spreadsheet.getSheetByName(sheetName);
-      if (sheet) return sheet;
+    if (options.sheetConfig) {
+      this._validateSheetConfig(options.sheetConfig);
+      this._sink = {
+        config: options.sheetConfig,
+        sheet: undefined,
+        buffer: [],
+        flushThreshold: options.flushThreshold || null,
+        bypassBufferLevels: new Set(options.bypassBufferLevels || []),
+      };
+    } else {
+      this._sink = null;
     }
-
-    return this._insertSheet(spreadsheet, sheetName);
   }
 
-  /**
-   * Resolve the spreadsheet from the provided source option.
-   * Throws if more than on source is passed in options.
-   */
-  private _resolveSpreadsheet(): GoogleAppsScript.Spreadsheet.Spreadsheet {
-    const { spreadsheet, spreadsheetUrl, spreadsheetId, useActiveSpreadsheet } =
-      this._sheetConfig;
+  // =========================
+  // SHEET RESOLUTION
+  // =========================
 
-    // filter arguments
+  /**
+   * Validates the spreadsheet source options of a sheet config.
+   * Throws if more than one source is passed, or if
+   * `useActiveSpreadsheet` is false and no other source is passed.
+   */
+  private _validateSheetConfig(config: GasLoggerSheetConfig): void {
+    const { spreadsheet, spreadsheetUrl, spreadsheetId, useActiveSpreadsheet } =
+      config;
+
     const sources: Record<string, boolean> = {
       spreadsheet: !!spreadsheet,
       spreadsheetUrl: !!spreadsheetUrl,
@@ -72,31 +59,99 @@ class GasLogger {
       );
     }
 
-    let sourceSpreadsheet: GoogleAppsScript.Spreadsheet.Spreadsheet;
-
-    // return spreadsheet by the indicated method
-    if (spreadsheet) {
-      sourceSpreadsheet = spreadsheet;
-    } else if (spreadsheetUrl) {
-      sourceSpreadsheet = SpreadsheetApp.openByUrl(spreadsheetUrl);
-    } else if (spreadsheetId) {
-      sourceSpreadsheet = SpreadsheetApp.openById(spreadsheetId);
+    if (useActiveSpreadsheet === false && selected.length === 0) {
+      throw new Error(
+        '[GasLogger] "useActiveSpreadsheet" is false, so a spreadsheet source is required. Pass "spreadsheet", "spreadsheetUrl" or "spreadsheetId".',
+      );
     }
+  }
 
-    // default: return active spreadsheet
-    else {
-      const activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  /**
+   * Returns the shared log sheet, resolving it on first use. If resolution
+   * fails, the error is reported once to the console and sheet logging is
+   * disabled for the rest of the execution. Returns null when there is no
+   * sheet sink or it is disabled.
+   */
+  private _getSheet(): GoogleAppsScript.Spreadsheet.Sheet | null {
+    const sink = this._sink;
+    if (!sink) return null;
 
-      if (!activeSpreadsheet) {
-        throw new Error(
-          '[GasLogger] No active spreadsheet is accessible by this script. Pass "spreadsheet", "spreadsheetUrl" or "spreadsheetId" instead.',
+    if (sink.sheet === undefined) {
+      try {
+        sink.sheet = this._resolveSheet(sink.config);
+      } catch (error) {
+        console.error(
+          '[GasLogger] Could not resolve the log sheet; sheet logging is disabled for this execution.',
+          error,
         );
+        sink.sheet = null;
       }
-
-      sourceSpreadsheet = activeSpreadsheet;
     }
 
-    return sourceSpreadsheet;
+    return sink.sheet;
+  }
+
+  /**
+   * Resolve the log sheet in the configured spreadsheet, using the default
+   * sheet name when none is configured. A missing sheet is created inside
+   * the script lock, so concurrent executions don't race to create it.
+   */
+  private _resolveSheet(
+    config: GasLoggerSheetConfig,
+  ): GoogleAppsScript.Spreadsheet.Sheet {
+    const spreadsheet = this._resolveSpreadsheet(config);
+    const sheetName = config.sheetName || GAS_LOGGER_DEFAULT_SHEET_NAME;
+
+    return (
+      spreadsheet.getSheetByName(sheetName) ||
+      this._withLock(
+        () =>
+          spreadsheet.getSheetByName(sheetName) ||
+          this._insertSheet(spreadsheet, sheetName),
+      )
+    );
+  }
+
+  /**
+   * Resolve the spreadsheet from the provided source option, defaulting
+   * to the active spreadsheet.
+   */
+  private _resolveSpreadsheet(
+    config: GasLoggerSheetConfig,
+  ): GoogleAppsScript.Spreadsheet.Spreadsheet {
+    const { spreadsheet, spreadsheetUrl, spreadsheetId } = config;
+
+    if (spreadsheet) return spreadsheet;
+    if (spreadsheetUrl) return SpreadsheetApp.openByUrl(spreadsheetUrl);
+    if (spreadsheetId) return SpreadsheetApp.openById(spreadsheetId);
+
+    const activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+
+    if (!activeSpreadsheet) {
+      throw new Error(
+        '[GasLogger] No active spreadsheet is accessible by this script. Pass "spreadsheet", "spreadsheetUrl" or "spreadsheetId" instead.',
+      );
+    }
+
+    return activeSpreadsheet;
+  }
+
+  /**
+   * Runs `fn` while holding the script lock, which is released afterwards
+   * even if `fn` throws. Throws if the lock can't be acquired in time.
+   */
+  private _withLock<T>(fn: () => T): T {
+    const lock = LockService.getScriptLock();
+
+    if (!lock.tryLock(GAS_LOGGER_LOCK_TIMEOUT_MS)) {
+      throw new Error('[GasLogger] Timed out waiting for the script lock.');
+    }
+
+    try {
+      return fn();
+    } finally {
+      lock.releaseLock();
+    }
   }
 
   /**
@@ -106,24 +161,9 @@ class GasLogger {
    */
   private _insertSheet(
     spreadsheet: GoogleAppsScript.Spreadsheet.Spreadsheet,
-    sheetName: string | null = null,
+    sheetName: string,
   ): GoogleAppsScript.Spreadsheet.Sheet {
-    let newSheetName = sheetName;
-
-    if (!newSheetName) {
-      const allSheetNames = spreadsheet
-        .getSheets()
-        .map((s) => s.getSheetName());
-
-      const defaultSheetName = 'gas-log-{i}';
-
-      let i = 0;
-      do {
-        newSheetName = defaultSheetName.replace('{i}', String(i++));
-      } while (allSheetNames.includes(newSheetName));
-    }
-
-    const newSheet = spreadsheet.insertSheet(newSheetName);
+    const newSheet = spreadsheet.insertSheet(sheetName);
 
     newSheet
       .getRange(GAS_LOGGER_KEYS_ROW, 1, 1, GAS_LOGGER_COLUMN_KEYS.length)
@@ -139,7 +179,7 @@ class GasLogger {
 
     newSheet.setFrozenRows(GAS_LOGGER_KEYS_ROW);
 
-    Logger.log('[GasLogger] Inserted new log sheet "%s"', newSheetName);
+    Logger.log('[GasLogger] Inserted new log sheet "%s"', sheetName);
 
     return newSheet;
   }
@@ -210,25 +250,25 @@ class GasLogger {
   }
 
   /**
-   * Writes buffered rows to the sheet in one batch. No-op if buffer is empty
-   * or no sheet is configured. Clears the buffer after writing.
+   * Writes buffered rows to the sheet in one batch. No-op if buffer is empty,
+   * no sheet is configured or the sheet could not be resolved. Clears the
+   * buffer after writing.
    */
   private _flushBuffer(): void {
-    if (
-      this._flushThreshold === null ||
-      !this._sheet ||
-      this._buffer.length === 0
-    )
+    const sink = this._sink;
+
+    if (!sink || sink.flushThreshold === null || sink.buffer.length === 0)
       return;
 
-    const startRow = this._sheet.getLastRow() + 1;
-    this._sheet
-      .getRange(startRow, 1, this._buffer.length, 4)
-      .setValues(this._buffer);
+    const sheet = this._getSheet();
+    if (!sheet) return;
+
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, sink.buffer.length, 4).setValues(sink.buffer);
 
     // Truncate in place: child loggers share this array by reference, so
     // rebinding would leave them holding the already-written rows.
-    this._buffer.length = 0;
+    sink.buffer.length = 0;
   }
 
   /**
@@ -236,12 +276,13 @@ class GasLogger {
    * independent thresholds (`_level`, `_sheetLevel`), so a route can stay
    * verbose in Cloud Logging while only surfacing warnings and up on the
    * sheet. Routes to buffer or directly to sheet based on whether buffering
-   * is enabled and if the level should bypass the buffer.
+   * is enabled and if the level should bypass the buffer. The sheet is
+   * resolved on the first entry that meets `_sheetLevel`.
    */
   private _log(level: GasLoggerLevel, msg: string, meta?: GasLoggerMeta): void {
     const logToConsole = this._meetsLevel(level, this._level);
-    const logToSheet =
-      !!this._sheet && this._meetsLevel(level, this._sheetLevel);
+    const sink = this._sink;
+    const logToSheet = !!sink && this._meetsLevel(level, this._sheetLevel);
 
     if (!logToConsole && !logToSheet) return;
 
@@ -249,21 +290,24 @@ class GasLogger {
 
     if (logToConsole) this._emit(level, msg, mergedMeta);
 
-    if (!this._sheet || !logToSheet) return;
+    if (!sink || !logToSheet) return;
+
+    const sheet = this._getSheet();
+    if (!sheet) return;
 
     const row = this._toRow(level, msg, mergedMeta);
 
-    const flushThreshold = this._flushThreshold;
+    const flushThreshold = sink.flushThreshold;
     const shouldBuffer =
-      flushThreshold !== null && !this._bypassBufferLevels.has(level);
+      flushThreshold !== null && !sink.bypassBufferLevels.has(level);
 
     if (shouldBuffer) {
-      this._buffer.push(row);
-      if (this._buffer.length >= flushThreshold) {
+      sink.buffer.push(row);
+      if (sink.buffer.length >= flushThreshold) {
         this._flushBuffer();
       }
     } else {
-      this._sheet.appendRow(row);
+      sheet.appendRow(row);
     }
   }
 
@@ -273,24 +317,22 @@ class GasLogger {
 
   /**
    * Creates a child logger that merges the given bindings into the meta
-   * of every subsequent log call. Reuses the parent's already-resolved
-   * sheet and buffer. `overrides.level`/`overrides.sheetLevel` scope the
+   * of every subsequent log call. Shares the parent's sheet sink, so the
+   * sheet is resolved once by whichever logger writes first, and the buffer
+   * is common to both. `overrides.level`/`overrides.sheetLevel` scope the
    * child to its own thresholds without affecting the parent.
    */
   child(
     bindings?: GasLoggerMeta,
     overrides: GasLoggerChildOverrides = {},
   ): GasLogger {
-    const child: GasLogger = Object.create(GasLogger.prototype);
+    const child = new GasLogger({
+      level: overrides.level || this._level,
+      sheetLevel: overrides.sheetLevel || this._sheetLevel,
+      bindings: { ...this._bindings, ...bindings },
+    });
 
-    child._level = overrides.level || this._level;
-    child._sheetLevel = overrides.sheetLevel || this._sheetLevel;
-    child._sheetConfig = this._sheetConfig;
-    child._sheet = this._sheet;
-    child._bindings = { ...this._bindings, ...bindings };
-    child._buffer = this._buffer;
-    child._flushThreshold = this._flushThreshold;
-    child._bypassBufferLevels = this._bypassBufferLevels;
+    child._sink = this._sink;
 
     return child;
   }
@@ -325,7 +367,8 @@ class GasLogger {
 
   /**
    * Flushes all buffered rows to the sheet and clears the buffer.
-   * No-op if no sheet is configured or buffer is empty.
+   * No-op if no sheet is configured, the sheet could not be resolved, or
+   * the buffer is empty.
    * Call this in a try/finally block to ensure buffered rows are written
    * before the script ends.
    */

@@ -9,6 +9,12 @@ const GAS_LOGGER_COLUMN_KEYS = [
 /* The index base-1 row number where the columns keys will be inserted */
 const GAS_LOGGER_KEYS_ROW = 1;
 
+/* Name of the log sheet when `sheetConfig.sheetName` is not provided */
+const GAS_LOGGER_DEFAULT_SHEET_NAME = 'gas-log';
+
+/* Milliseconds to wait for the script lock before giving up */
+const GAS_LOGGER_LOCK_TIMEOUT_MS = 10000;
+
 const GAS_LOGGER_LEVELS: Record<GasLoggerLevel, number> = {
   trace: 10,
   debug: 20,

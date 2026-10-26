@@ -26,18 +26,6 @@ function cells(sheet: FakeSheet, column: number): string[] {
 }
 
 describe('known bugs', () => {
-  it.fails('#1 reuses a single default "gas-log" tab across loggers', () => {
-    const { GasLogger, mocks } = loadGasLogger();
-    const config = { useActiveSpreadsheet: true };
-
-    new GasLogger({ sheetConfig: config }).info('a');
-    new GasLogger({ sheetConfig: config }).info('b');
-
-    expect(
-      mocks.activeSpreadsheet.getSheets().map((s) => s.getSheetName()),
-    ).toEqual(['gas-log']);
-  });
-
   it.fails('#2 flush holds and releases the script lock', () => {
     const { mocks, logger } = setup({ flushThreshold: 1 });
 
@@ -142,72 +130,6 @@ describe('known bugs', () => {
 
     expect(cells(sheet, 2)).toEqual(['a', 'b', 'c']);
   });
-
-  it.fails(
-    '#9a opens the spreadsheet on first write, not in the constructor',
-    () => {
-      const { GasLogger, mocks } = loadGasLogger();
-
-      const logger = new GasLogger({
-        sheetConfig: { useActiveSpreadsheet: true },
-      });
-      expect(mocks.SpreadsheetApp.getActiveSpreadsheet).not.toHaveBeenCalled();
-
-      logger.info('msg');
-      expect(mocks.SpreadsheetApp.getActiveSpreadsheet).toHaveBeenCalled();
-    },
-  );
-
-  it.fails(
-    '#9b a failing spreadsheet source does not throw from the constructor',
-    () => {
-      const { GasLogger, mocks } = loadGasLogger();
-      mocks.SpreadsheetApp.openById.mockImplementation(() => {
-        throw new Error('No item with the given ID could be found.');
-      });
-
-      expect(
-        () => new GasLogger({ sheetConfig: { spreadsheetId: 'missing' } }),
-      ).not.toThrow();
-    },
-  );
-
-  it.fails(
-    '#10a an empty sheetConfig enables the sheet on the active spreadsheet',
-    () => {
-      const { GasLogger, mocks } = loadGasLogger();
-
-      new GasLogger({ sheetConfig: {} }).info('msg');
-
-      expect(mocks.activeSpreadsheet.getSheets()).toHaveLength(1);
-    },
-  );
-
-  it.fails(
-    '#10b useActiveSpreadsheet: false without another source throws',
-    () => {
-      const { GasLogger } = loadGasLogger();
-
-      expect(
-        () => new GasLogger({ sheetConfig: { useActiveSpreadsheet: false } }),
-      ).toThrow();
-    },
-  );
-
-  it.fails(
-    '#11 falls back to a sheet created concurrently by another execution',
-    () => {
-      const { GasLogger, mocks } = loadGasLogger();
-      const existing = mocks.activeSpreadsheet.insertSheet(SHEET_NAME);
-      mocks.activeSpreadsheet.getSheetByName.mockReturnValueOnce(null);
-
-      new GasLogger({
-        sheetConfig: { useActiveSpreadsheet: true, sheetName: SHEET_NAME },
-      }).info('msg');
-
-      expect(cells(existing, 2)).toContain('msg');
-    },
-  );
 
   it.fails('#12 applies banding to the four log columns only', () => {
     const { GasLogger, mocks } = loadGasLogger();
