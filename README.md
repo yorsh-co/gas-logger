@@ -20,7 +20,7 @@
 - Optional Google Sheets sink: pass `spreadsheet`, `spreadsheetUrl`, `spreadsheetId`, or `useActiveSpreadsheet` in `sheetConfig` to also append each entry as a row in a dedicated log sheet tab
 - Independent `sheetLevel` threshold — e.g. stay verbose in Cloud Logging while only writing `warn`+ to the sheet
 - Auto-creates the target sheet if it doesn't exist yet, with a frozen, bold header row and alternating row colors
-- Row buffering via `flushThreshold`, with `bypassBufferLevels` for levels (e.g. `error`, `fatal`) that should always write through immediately
+- Row buffering via `flushThreshold`, with `bypassBufferLevels` for levels (e.g. `error`, `fatal`) that flush the buffer immediately
 - Child loggers (`logger.child(bindings, overrides)`) that merge bound fields into every subsequent call's `meta`, optionally scoped to their own `level`/`sheetLevel`
 - Written in TypeScript; ships compiled `.js` plus matching `.d.ts` files, so no build step is required to consume it, TS or not
 - No external dependencies beyond built-in Apps Script services
@@ -134,7 +134,7 @@ src/lib/gas-logger/
 > Apps Script executes files by the order in the Apps Script editor, from top to bottom. By default, `clasp push` orders the files alphabetically, by file name. If a `GasLogger` instance is declared at runtime (as a global variable or in an IIFE) in file referencing `GasLogger` that is ordered before `gas-logger`'s own files, `clasp push` will succeed but running the project will throw:
 >
 > ```txt
-> ReferenceError: GasSheetDb is not defined
+> ReferenceError: GasLogger is not defined
 > ```
 >
 > To avoid this, add a [`filePushOrder`](https://github.com/google/clasp#filepushorder-optional) entry to your project's `.clasp.json` that pushes `gas-logger`'s module files ahead of any file that references them:
@@ -147,6 +147,8 @@ src/lib/gas-logger/
 >   ]
 > }
 > ```
+>
+> Use the path where the files land in your pushed project, e.g. `src/lib/gas-logger/...` when pushing the subtree as-is.
 >
 > Alternatively, you can manually move these files to the top of the file list in the Apps Script editor.
 
@@ -230,7 +232,7 @@ const logger = new GasLogger({
 });
 ```
 
-By default, every log row is appended to the sheet individually. Set `flushThreshold` to buffer rows in memory and write them in a single batch once the buffer reaches that size. Use `bypassBufferLevels` for levels that should always skip the buffer and write through immediately — e.g. so an `error` isn't lost if the script exits before the next flush. A bypass-level entry is written immediately together with any pending buffered rows, in one locked batch, so the sheet stays in chronological order.
+By default, every log row is appended to the sheet individually. Set `flushThreshold` to buffer rows in memory and write them in a single batch once the buffer reaches that size. Use `bypassBufferLevels` for levels that should never wait for the threshold — e.g. so an `error` isn't lost if the script exits before the next flush. A bypass-level entry flushes the buffer immediately, so it is written together with any pending buffered rows in one locked batch and the sheet stays in chronological order.
 
 Batched flushes hold the script lock while writing, so concurrent executions don't overwrite each other's rows, and add rows to the sheet when it is full.
 

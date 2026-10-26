@@ -21,6 +21,13 @@
 - Truncate `message` and `meta_json` cells to the 50,000 character cell limit, ending with `…[truncated]`; console output is not truncated
 - Build the console payload so `message` and `level` can't be overridden by meta or bindings
 - Emit `trace`, `debug` and `fatal` as a structured payload even without meta, so the real level is always present
+- Stop shipping the empty `gas-logger.types.js` to the `dist` branch; the release script now excludes `*.types.js` and keeps the `.d.ts`
+- Harden the release script: fail early on a dirty working tree, a missing or empty `dist/`, or an existing `dist/<version>` tag locally or on origin; sync with `origin/dist` (creating a local `dist` that tracks it, or fast-forwarding, and refusing to discard unpushed commits); exit with a clear message when there is nothing to release; push only the `dist` branch and the release tag instead of `--tags`
+
+### Docs
+
+- Fix the `filePushOrder` error example to name `GasLogger` and note that the paths must match where the files land in the pushed project
+- Describe `bypassBufferLevels` as flushing the buffer together with pending rows instead of skipping it
 
 ### Added
 
