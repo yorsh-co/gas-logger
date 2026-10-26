@@ -243,7 +243,7 @@ Batched flushes hold the script lock while writing, so concurrent executions don
 logger.info('Order placed', { orderId: 'ORD-123', total: 49.99 });
 ```
 
-`meta` is merged into the console payload (as a structured `jsonPayload` for Cloud Logging) and, when a sheet is configured, JSON-stringified into the `meta_json` column.
+`meta` is merged into the console payload (as a structured `jsonPayload` for Cloud Logging) and, when a sheet is configured, JSON-stringified into the `meta_json` column. `Error` values are serialized as `{ name, message, stack, ...ownProperties }`, `bigint` values as strings, and circular references are replaced with `[Circular]`, so logging never throws because of the meta.
 
 ### Child Loggers
 
@@ -269,11 +269,11 @@ Six levels, in ascending severity: `trace` < `debug` < `info` < `warn` < `error`
 
 ### Console Output
 
-Every log call is emitted to the Apps Script `console` service, which feeds Cloud Logging with a severity and, when `meta` is present, a structured `jsonPayload`. `trace`, `debug` and `fatal` have no dedicated `console` method, so they're emitted via `console.info`/`console.error`, with the real level kept in the payload.
+Every log call is emitted to the Apps Script `console` service, which feeds Cloud Logging with a severity and, when `meta` is present, a structured `jsonPayload`. `trace`, `debug` and `fatal` have no `console` method of their own, so they're emitted via `console.info`/`console.error` and always as a structured payload, with the real level in the payload. `message` and `level` in a structured payload always reflect the call; a `meta` or binding field with either name doesn't override them. `info`, `warn` and `error` without `meta` are emitted as a plain string. Console output is never truncated.
 
 ### Sheet Output
 
-When `sheetConfig` is provided, each log call is also appended as a row (`timestamp`, `level`, `message`, `meta_json`) to the log sheet (`gas-log` unless `sheetName` is set) — either buffered (see [Buffer Writes](#buffer-writes)) or written immediately, one `appendRow` per call, if no `flushThreshold` is set. Unbuffered loggers use `appendRow` without the script lock, so a sheet shared with buffered loggers in other executions should use buffering consistently.
+When `sheetConfig` is provided, each log call is also appended as a row (`timestamp`, `level`, `message`, `meta_json`) to the log sheet (`gas-log` unless `sheetName` is set) — either buffered (see [Buffer Writes](#buffer-writes)) or written immediately, one `appendRow` per call, if no `flushThreshold` is set. The `message` and `meta_json` cells are stored as text when they start with `=`, `+`, `-` or `@` (prefixed with `'`) so Sheets never evaluates them as formulas, and are truncated to 50,000 characters (the cell limit), ending with `…[truncated]`. Unbuffered loggers use `appendRow` without the script lock, so a sheet shared with buffered loggers in other executions should use buffering consistently.
 
 Logging never throws because of a sheet write. If a write fails (e.g. the script lock times out or a quota is hit), the error is reported to `console.error` and the affected rows are dropped; later entries are still written.
 

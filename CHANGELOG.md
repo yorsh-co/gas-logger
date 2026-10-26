@@ -16,10 +16,15 @@
 - Report sheet write failures to `console.error` and drop the affected rows instead of throwing from the logger; the buffer is always cleared so a failed batch is never re-written
 - Apply row banding and the bold header to the four log columns only, instead of every column in the sheet
 - Correct the `_resolveSheet` JSDoc and a typo in the source validation docs
+- Serialize `Error` values in meta (name, message, stack and own enumerable properties), `bigint` values as strings and circular references as `[Circular]`, for both the console and the sheet, instead of throwing or logging `{}`
+- Store `message` and `meta_json` cells starting with `=`, `+`, `-` or `@` as text, so logged input can't inject sheet formulas
+- Truncate `message` and `meta_json` cells to the 50,000 character cell limit, ending with `…[truncated]`; console output is not truncated
+- Build the console payload so `message` and `level` can't be overridden by meta or bindings
+- Emit `trace`, `debug` and `fatal` as a structured payload even without meta, so the real level is always present
 
 ### Added
 
-- Vitest test suite with in-memory Apps Script service mocks, covering current behaviour and documenting known defects as expected failures
+- Vitest test suite with in-memory Apps Script service mocks
 
 ### Changed
 
