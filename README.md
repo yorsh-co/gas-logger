@@ -230,7 +230,9 @@ const logger = new GasLogger({
 });
 ```
 
-By default, every log row is appended to the sheet individually. Set `flushThreshold` to buffer rows in memory and write them in a single batch once the buffer reaches that size. Use `bypassBufferLevels` for levels that should always skip the buffer and write through immediately — e.g. so an `error` isn't lost if the script exits before the next flush.
+By default, every log row is appended to the sheet individually. Set `flushThreshold` to buffer rows in memory and write them in a single batch once the buffer reaches that size. Use `bypassBufferLevels` for levels that should always skip the buffer and write through immediately — e.g. so an `error` isn't lost if the script exits before the next flush. A bypass-level entry is written immediately together with any pending buffered rows, in one locked batch, so the sheet stays in chronological order.
+
+Batched flushes hold the script lock while writing, so concurrent executions don't overwrite each other's rows, and add rows to the sheet when it is full.
 
 > [!IMPORTANT]
 > Call `logger.flush()` in a `try`/`finally` block to make sure any remaining buffered rows are written before the script ends.
@@ -271,7 +273,9 @@ Every log call is emitted to the Apps Script `console` service, which feeds Clou
 
 ### Sheet Output
 
-When `sheetConfig` is provided, each log call is also appended as a row (`timestamp`, `level`, `message`, `meta_json`) to the log sheet (`gas-log` unless `sheetName` is set) — either buffered (see [Buffer Writes](#buffer-writes)) or written immediately, one `appendRow` per call, if no `flushThreshold` is set.
+When `sheetConfig` is provided, each log call is also appended as a row (`timestamp`, `level`, `message`, `meta_json`) to the log sheet (`gas-log` unless `sheetName` is set) — either buffered (see [Buffer Writes](#buffer-writes)) or written immediately, one `appendRow` per call, if no `flushThreshold` is set. Unbuffered loggers use `appendRow` without the script lock, so a sheet shared with buffered loggers in other executions should use buffering consistently.
+
+Logging never throws because of a sheet write. If a write fails (e.g. the script lock times out or a quota is hit), the error is reported to `console.error` and the affected rows are dropped; later entries are still written.
 
 ## License
 
