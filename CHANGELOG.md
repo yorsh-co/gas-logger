@@ -4,12 +4,21 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Resolve the sheet on the first write instead of in the constructor; access errors (bad id, no active spreadsheet, lock timeout) are reported once to `console.error` and disable the sheet sink for the execution instead of throwing from the logger
+- Reuse a single default `gas-log` tab instead of creating `gas-log-0`, `gas-log-1`, ... on every new logger
+- Create the log sheet inside the script lock and re-check for it after acquiring the lock, so concurrent first runs no longer fail on a duplicate sheet name
+- Treat an empty `sheetConfig` as enabling the sheet sink on the active spreadsheet, and throw at construction for `useActiveSpreadsheet: false` without another source
+- Correct the `_resolveSheet` JSDoc and a typo in the source validation docs
+
 ### Added
 
 - Vitest test suite with in-memory Apps Script service mocks, covering current behaviour and documenting known defects as expected failures
 
 ### Changed
 
+- Hold the sheet, buffer and flush settings in a single sink object shared by a logger and its children, and build children with the constructor instead of `Object.create`
 - ESLint config uses `defineConfig` from `eslint/config` and drops the stale `no-undef` comment
 - `npm run typecheck` and ESLint also cover `test/` through `tsconfig.test.json`; `npm run check` runs the test suite
 
