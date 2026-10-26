@@ -26,15 +26,6 @@ function cells(sheet: FakeSheet, column: number): string[] {
 }
 
 describe('known bugs', () => {
-  it.fails('#2 flush holds and releases the script lock', () => {
-    const { mocks, logger } = setup({ flushThreshold: 1 });
-
-    logger.info('msg');
-
-    expect(mocks.LockService.getScriptLock).toHaveBeenCalled();
-    expect(mocks.lock.releaseLock).toHaveBeenCalled();
-  });
-
   it.fails.each(['=', '+', '-', '@'])(
     '#3 neutralises a leading "%s" in the message cell',
     (prefix) => {
@@ -52,18 +43,6 @@ describe('known bugs', () => {
     meta.self = meta;
 
     expect(() => logger.info('msg', meta)).not.toThrow();
-  });
-
-  it.fails('#4b sheet write errors are reported, not thrown', () => {
-    const { mocks, sheet, logger } = setup();
-    sheet.appendRow.mockImplementation(() => {
-      throw new Error('quota exceeded');
-    });
-
-    expect(() => logger.error('msg')).not.toThrow();
-    expect(mocks.console.error).toHaveBeenCalledWith(
-      expect.stringContaining('[GasLogger]'),
-    );
   });
 
   it.fails('#4c truncates messages to the 50000 character cell limit', () => {
@@ -116,41 +95,4 @@ describe('known bugs', () => {
       });
     },
   );
-
-  it.fails('#8 bypass entries do not jump ahead of buffered rows', () => {
-    const { sheet, logger } = setup({
-      flushThreshold: 10,
-      bypassBufferLevels: ['error'],
-    });
-
-    logger.info('a');
-    logger.info('b');
-    logger.error('c');
-    logger.flush();
-
-    expect(cells(sheet, 2)).toEqual(['a', 'b', 'c']);
-  });
-
-  it.fails('#12 applies banding to the four log columns only', () => {
-    const { GasLogger, mocks } = loadGasLogger();
-
-    new GasLogger({
-      sheetConfig: { useActiveSpreadsheet: true, sheetName: SHEET_NAME },
-    }).info('msg');
-
-    const sheet = mocks.activeSpreadsheet.getSheets()[0];
-    expect(sheet?.calls.applyRowBanding[0]?.numCols).toBe(4);
-  });
-
-  it.fails('#20 buffered flush grows a full sheet instead of throwing', () => {
-    const { sheet, logger } = setup({ flushThreshold: 2 });
-    sheet.values = [['h'], ['x'], ['y']];
-    sheet.maxRows = 3;
-
-    expect(() => {
-      logger.info('a');
-      logger.info('b');
-    }).not.toThrow();
-    expect(cells(sheet, 2).slice(3)).toEqual(['a', 'b']);
-  });
 });

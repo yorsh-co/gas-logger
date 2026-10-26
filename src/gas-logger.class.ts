@@ -169,13 +169,15 @@ class GasLogger {
       .getRange(GAS_LOGGER_KEYS_ROW, 1, 1, GAS_LOGGER_COLUMN_KEYS.length)
       .setValues([GAS_LOGGER_COLUMN_KEYS as unknown as string[]]);
 
-    const maxCols = newSheet.getMaxColumns();
+    const columnCount = GAS_LOGGER_COLUMN_KEYS.length;
 
     newSheet
-      .getRange(GAS_LOGGER_KEYS_ROW, 1, newSheet.getMaxRows(), maxCols)
+      .getRange(GAS_LOGGER_KEYS_ROW, 1, newSheet.getMaxRows(), columnCount)
       .applyRowBanding();
 
-    newSheet.getRange(GAS_LOGGER_KEYS_ROW, 1, 1, maxCols).setFontWeight('bold');
+    newSheet
+      .getRange(GAS_LOGGER_KEYS_ROW, 1, 1, columnCount)
+      .setFontWeight('bold');
 
     newSheet.setFrozenRows(GAS_LOGGER_KEYS_ROW);
 
@@ -250,9 +252,24 @@ class GasLogger {
   }
 
   /**
+   * Reports rows that could not be written to the sheet. Logging never
+   * throws because of a sheet write, so the failure is surfaced to the
+   * console instead.
+   */
+  private _reportWriteFailure(rowCount: number, error: unknown): void {
+    console.error(
+      `[GasLogger] Failed to write ${rowCount} row(s) to the log sheet.`,
+      error,
+    );
+  }
+
+  /**
    * Writes buffered rows to the sheet in one batch. No-op if buffer is empty,
-   * no sheet is configured or the sheet could not be resolved. Clears the
-   * buffer after writing.
+   * no sheet is configured or the sheet could not be resolved. The batch is
+   * written under the script lock, so concurrent executions don't overwrite
+   * each other, and the sheet grows when it has fewer free rows than the
+   * batch needs. The buffer is cleared afterwards even if the write fails;
+   * the dropped rows are reported to the console.
    */
   private _flushBuffer(): void {
     const sink = this._sink;
@@ -263,12 +280,26 @@ class GasLogger {
     const sheet = this._getSheet();
     if (!sheet) return;
 
-    const startRow = sheet.getLastRow() + 1;
-    sheet.getRange(startRow, 1, sink.buffer.length, 4).setValues(sink.buffer);
+    const rowCount = sink.buffer.length;
 
-    // Truncate in place: child loggers share this array by reference, so
-    // rebinding would leave them holding the already-written rows.
-    sink.buffer.length = 0;
+    try {
+      this._withLock(() => {
+        const startRow = sheet.getLastRow() + 1;
+        const overflow = startRow + rowCount - 1 - sheet.getMaxRows();
+
+        if (overflow > 0) sheet.insertRowsAfter(sheet.getMaxRows(), overflow);
+
+        sheet
+          .getRange(startRow, 1, rowCount, GAS_LOGGER_COLUMN_KEYS.length)
+          .setValues(sink.buffer);
+      });
+    } catch (error) {
+      this._reportWriteFailure(rowCount, error);
+    } finally {
+      // Truncate in place: child loggers share this array by reference, so
+      // rebinding would leave them holding the already-written rows.
+      sink.buffer.length = 0;
+    }
   }
 
   /**
@@ -276,8 +307,10 @@ class GasLogger {
    * independent thresholds (`_level`, `_sheetLevel`), so a route can stay
    * verbose in Cloud Logging while only surfacing warnings and up on the
    * sheet. Routes to buffer or directly to sheet based on whether buffering
-   * is enabled and if the level should bypass the buffer. The sheet is
-   * resolved on the first entry that meets `_sheetLevel`.
+   * is enabled. With buffering, a bypass-level entry joins the buffer and
+   * flushes it immediately, so it is written in order with any pending rows
+   * in a single locked batch. The sheet is resolved on the first entry that
+   * meets `_sheetLevel`.
    */
   private _log(level: GasLoggerLevel, msg: string, meta?: GasLoggerMeta): void {
     const logToConsole = this._meetsLevel(level, this._level);
@@ -298,16 +331,21 @@ class GasLogger {
     const row = this._toRow(level, msg, mergedMeta);
 
     const flushThreshold = sink.flushThreshold;
-    const shouldBuffer =
-      flushThreshold !== null && !sink.bypassBufferLevels.has(level);
 
-    if (shouldBuffer) {
+    if (flushThreshold !== null) {
       sink.buffer.push(row);
-      if (sink.buffer.length >= flushThreshold) {
+      if (
+        sink.bypassBufferLevels.has(level) ||
+        sink.buffer.length >= flushThreshold
+      ) {
         this._flushBuffer();
       }
     } else {
-      sheet.appendRow(row);
+      try {
+        sheet.appendRow(row);
+      } catch (error) {
+        this._reportWriteFailure(1, error);
+      }
     }
   }
 
