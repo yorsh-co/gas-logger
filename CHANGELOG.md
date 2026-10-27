@@ -2,6 +2,15 @@
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- Lint, TypeScript and Prettier configuration and the test loader come from [`gas-dev-config`](https://github.com/yorsh-co/gas-dev-config)
+- Dependabot groups development dependencies weekly
+
+---
+
 ## [1.1.1] - 2026-10-27
 
 ### Changed
