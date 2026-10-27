@@ -1,12 +1,7 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "gas-dev-config/tsconfig/test.json",
   "compilerOptions": {
-    "rootDir": ".",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "noEmit": true,
-    "declaration": false,
-    "types": ["node", "google-apps-script"]
+    "rootDir": "."
   },
   "include": ["test/**/*.ts"]
 }
