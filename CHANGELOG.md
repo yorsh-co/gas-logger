@@ -2,6 +2,16 @@
 
 ---
 
+## [1.1.1] - 2026-10-27
+
+### Changed
+
+- Releases are published with [`gas-dev-release`](https://github.com/yorsh-co/gas-dev-release) instead of `scripts/release.sh`, which adds a check that the `v<version>` tag is at `HEAD` and pushes the branch and tag atomically
+- Tags use a `v` prefix: versions are tagged `vX.Y.Z` and releases `dist/vX.Y.Z`; the earlier plain tags were replaced
+- Bump the transitive dev dependency `brace-expansion` to 5.0.12 to resolve high-severity DoS advisories reported by `npm audit`
+
+---
+
 ## [1.1.0] - 2026-10-26
 
 ### Fixed
