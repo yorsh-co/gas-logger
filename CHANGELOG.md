@@ -2,6 +2,14 @@
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- Bump the transitive dev dependency `brace-expansion` to 5.0.12 to resolve high-severity DoS advisories reported by `npm audit`
+
+---
+
 ## [1.1.0] - 2026-10-26
 
 ### Fixed
