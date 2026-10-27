@@ -39,14 +39,5 @@ export default defineConfig(
     },
   },
 
-  // Node.js build scripts — ESM, full Node globals, no TS project linting.
-  {
-    files: ['scripts/**/*.js'],
-    languageOptions: {
-      sourceType: 'module',
-      globals: globals.node,
-    },
-  },
-
   eslintConfigPrettier,
 );
