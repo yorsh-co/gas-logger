@@ -13,6 +13,11 @@ declare class GasLogger {
    */
   constructor(options?: GasLoggerOptions);
   /**
+   * Validates a lockService, falling back to the library default when
+   * omitted. Throws if it doesn't expose `withLock`.
+   */
+  private _resolveLockService;
+  /**
    * Validates the spreadsheet source options of a sheet config.
    * Throws if more than one source is passed, or if
    * `useActiveSpreadsheet` is false and no other source is passed.
@@ -37,8 +42,9 @@ declare class GasLogger {
    */
   private _resolveSpreadsheet;
   /**
-   * Runs `fn` while holding the script lock, which is released afterwards
-   * even if `fn` throws. Throws if the lock can't be acquired in time.
+   * Runs `fn` while holding the script lock through the sink's lock service,
+   * which releases it afterwards even if `fn` throws. Throws if the lock
+   * can't be acquired in time.
    */
   private _withLock;
   /**

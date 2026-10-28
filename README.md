@@ -236,6 +236,20 @@ By default, every log row is appended to the sheet individually. Set `flushThres
 
 Batched flushes hold the script lock while writing, so concurrent executions don't overwrite each other's rows, and add rows to the sheet when it is full.
 
+#### Lock Service
+
+```js
+const logger = new GasLogger({
+  sheetConfig: { useActiveSpreadsheet: true },
+  flushThreshold: 25,
+  lockService: GasLock,
+});
+```
+
+Apps Script locks are owned per execution, not per `getScriptLock()` handle. If your code already holds the script lock and logs inside that section, a plain `LockService` acquire in the logger succeeds immediately and its release ends **your** critical section early. Sheet creation and buffered flushes are the points where the logger takes the lock.
+
+Pass `lockService` — any object exposing `withLock(scope, callback, options?)`, such as [`GasLock`](https://github.com/yorsh-co/gas-lock) — to take the lock through a reentrant service that doesn't release the caller's lock. If omitted, the `GasLock` global is used automatically when it is loaded (looked up on each acquisition, so load order doesn't matter), else Apps Script's `LockService` is used directly. The logger calls `withLock('script', callback, { timeoutMs: 10000 })`; a service that can't acquire the lock must throw, and the failure is reported to `console.error` like any other sheet error. Passing the `LockService` global itself throws at construction. Child loggers share the parent's lock service.
+
 > [!IMPORTANT]
 > Call `logger.flush()` in a `try`/`finally` block to make sure any remaining buffered rows are written before the script ends.
 

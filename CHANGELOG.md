@@ -2,6 +2,24 @@
 
 ---
 
+## [1.2.0] - 2026-10-28
+
+### Added
+
+- `lockService` option: any object exposing `withLock(scope, callback, options?)`, e.g. [`GasLock`](https://github.com/yorsh-co/gas-lock), through which sheet creation and buffered flushes take the script lock; the `GasLock` global is used automatically when it is loaded, resolved on each acquisition, else Apps Script's `LockService` as before
+
+### Fixed
+
+- A buffered flush or first sheet creation inside a caller's own script-lock section no longer ends that section early when GasLock is used; with raw `LockService`, locks are owned per execution and the nested release still ends the caller's section
+
+### Changed
+
+- Lint, TypeScript and Prettier configuration and the test loader come from [`gas-dev-config`](https://github.com/yorsh-co/gas-dev-config)
+- Dependabot groups development dependencies weekly
+- The vendored `GasLock` declaration is the canonical copy from gas-lock's `peer/`, at 1.1.0
+
+---
+
 ## [1.1.1] - 2026-10-27
 
 ### Changed
