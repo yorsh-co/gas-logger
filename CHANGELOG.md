@@ -2,7 +2,7 @@
 
 ---
 
-## [Unreleased]
+## [1.2.0] - 2026-10-28
 
 ### Added
 
@@ -16,7 +16,7 @@
 
 - Lint, TypeScript and Prettier configuration and the test loader come from [`gas-dev-config`](https://github.com/yorsh-co/gas-dev-config)
 - Dependabot groups development dependencies weekly
-- The vendored `GasLock` declaration is the canonical copy from gas-lock's `peer/`, at 1.0.0
+- The vendored `GasLock` declaration is the canonical copy from gas-lock's `peer/`, at 1.1.0
 
 ---
 
