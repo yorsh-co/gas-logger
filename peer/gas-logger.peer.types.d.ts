@@ -16,7 +16,7 @@
  * Usage: copy into the consuming package as `src/internal/`.
  *
  * @see https://github.com/yorsh-co/gas-logger
- * @version 1.1.1
+ * @version 1.2.0
  */
 
 type GasLoggerLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
@@ -33,6 +33,19 @@ interface GasLoggerSheetConfig {
   sheetName?: string;
 }
 
+/**
+ * Lock service the logger takes the script lock through. Anything exposing
+ * `withLock` fits, e.g. `GasLock`. `withLock` runs `callback` while holding
+ * the lock and throws if the lock can't be acquired within `timeoutMs`.
+ */
+interface GasLoggerLockService {
+  withLock<T>(
+    scope: 'script',
+    callback: () => T,
+    options?: { timeoutMs?: number },
+  ): T;
+}
+
 interface GasLoggerOptions {
   /** Minimum level to emit to the console/execution log. @default 'info' */
   level?: GasLoggerLevel;
@@ -45,6 +58,13 @@ interface GasLoggerOptions {
   flushThreshold?: number;
   /** Levels that skip the buffer and are appended to the sheet immediately. */
   bypassBufferLevels?: GasLoggerLevel[];
+  /**
+   * Service the script lock is taken through, for sheet creation and
+   * buffered flushes. Pass `GasLock` when the caller holds the script lock
+   * itself, so logging inside that section doesn't end it early. Defaults to
+   * the `GasLock` global when loaded, else Apps Script's `LockService`.
+   */
+  lockService?: GasLoggerLockService;
 }
 
 /** Per-child threshold overrides accepted by `GasLogger.child()`. */

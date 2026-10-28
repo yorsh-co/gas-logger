@@ -1,7 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import vm from 'node:vm';
-import ts from 'typescript';
+import { createGasLoader } from 'gas-dev-config/test';
 import { createMocks, type Mocks } from './mocks';
 
 type Level = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
@@ -15,6 +13,7 @@ export interface GasLoggerTestOptions {
   bindings?: Meta;
   flushThreshold?: number;
   bypassBufferLevels?: Level[];
+  lockService?: unknown;
 }
 
 export interface GasLoggerInstance {
@@ -36,47 +35,41 @@ export type GasLoggerConstructor = new (
 ) => GasLoggerInstance;
 
 /** Source files in load order; later files depend on earlier ones. */
-const SOURCE_FILES = [
-  'gas-logger.types.ts',
-  'gas-logger.constants.ts',
-  'gas-logger.class.ts',
+export const SOURCE_FILES = [
+  'src/gas-logger.types.ts',
+  'src/gas-logger.constants.ts',
+  'src/gas-logger.class.ts',
 ];
 
-/**
- * The sources are global-scope scripts without exports, so they are
- * transpiled once and concatenated into a single script.
- */
-const script = new vm.Script(
-  SOURCE_FILES.map((file) => {
-    const source = readFileSync(
-      fileURLToPath(new URL(`../src/${file}`, import.meta.url)),
-      'utf8',
-    );
-    return ts.transpileModule(source, {
-      compilerOptions: { target: ts.ScriptTarget.ES2021 },
-    }).outputText;
-  }).join('\n') + '\nGasLogger;',
-);
+export const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+const load = createGasLoader<{ GasLogger: GasLoggerConstructor }>({
+  files: SOURCE_FILES,
+  exports: ['GasLogger'],
+  root: ROOT,
+});
 
 /**
  * Evaluates the logger sources in a fresh context wired to fake Apps Script
  * services, so each call is isolated from every other.
  */
-export function loadGasLogger(overrides: Partial<Mocks> = {}): {
+export function loadGasLogger(
+  overrides: Partial<Mocks> = {},
+  globals: Record<string, unknown> = {},
+): {
   GasLogger: GasLoggerConstructor;
   mocks: Mocks;
 } {
   const mocks = { ...createMocks(), ...overrides };
   const { SpreadsheetApp, LockService, Logger, console } = mocks;
-  const context = vm.createContext({
-    SpreadsheetApp,
-    LockService,
-    Logger,
-    console,
-  });
-
   return {
-    GasLogger: script.runInContext(context) as GasLoggerConstructor,
+    GasLogger: load({
+      SpreadsheetApp,
+      LockService,
+      Logger,
+      console,
+      ...globals,
+    }).GasLogger,
     mocks,
   };
 }
