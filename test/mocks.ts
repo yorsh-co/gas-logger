@@ -136,6 +136,67 @@ export class FakeSpreadsheet {
   });
 }
 
+/**
+ * `LockService` modelling Apps Script's per-execution lock ownership: every
+ * handle shares one flag, so a nested `tryLock` succeeds while the execution
+ * already holds the lock and any `releaseLock` ends the holder's section.
+ */
+export function createOwnedLockService() {
+  let held = false;
+  const lock = {
+    tryLock: vi.fn((timeoutInMillis: number): boolean => {
+      void timeoutInMillis;
+      held = true;
+      return true;
+    }),
+    waitLock: vi.fn((timeoutInMillis: number): void => {
+      void timeoutInMillis;
+      held = true;
+    }),
+    releaseLock: vi.fn((): void => {
+      held = false;
+    }),
+    hasLock: vi.fn((): boolean => held),
+  };
+
+  return {
+    lock,
+    isHeld: (): boolean => held,
+    LockService: { getScriptLock: vi.fn(() => lock) },
+  };
+}
+
+/**
+ * GasLock-like service on top of an owned `LockService`: reentrant, taking
+ * the lock at the outermost call only, and throwing a lost-lock error when
+ * the lock was released from under the section.
+ */
+export function createReentrantLockService(
+  owned: ReturnType<typeof createOwnedLockService>,
+) {
+  let depth = 0;
+  const withLock = vi.fn(
+    <T>(scope: string, callback: () => T, options?: { timeoutMs?: number }) => {
+      void scope;
+      if (depth > 0) return callback();
+      owned.lock.waitLock(options?.timeoutMs ?? 30000);
+      depth++;
+      try {
+        const result = callback();
+        if (!owned.lock.hasLock()) {
+          throw new Error('[GasLock] Lost the lock during the section.');
+        }
+        return result;
+      } finally {
+        depth--;
+        owned.lock.releaseLock();
+      }
+    },
+  );
+
+  return { withLock };
+}
+
 /** Fresh set of Apps Script service fakes injected as globals. */
 export function createMocks() {
   const activeSpreadsheet = new FakeSpreadsheet();

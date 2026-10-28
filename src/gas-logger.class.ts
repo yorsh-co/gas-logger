@@ -17,6 +17,8 @@ class GasLogger {
     this._sheetLevel = options.sheetLevel || this._level;
     this._bindings = options.bindings || {};
 
+    const lockService = this._resolveLockService(options.lockService);
+
     if (options.sheetConfig) {
       this._validateSheetConfig(options.sheetConfig);
       this._sink = {
@@ -25,10 +27,29 @@ class GasLogger {
         buffer: [],
         flushThreshold: options.flushThreshold || null,
         bypassBufferLevels: new Set(options.bypassBufferLevels || []),
+        lockService,
       };
     } else {
       this._sink = null;
     }
+  }
+
+  /**
+   * Validates a lockService, falling back to the library default when
+   * omitted. Throws if it doesn't expose `withLock`.
+   */
+  private _resolveLockService(
+    lockService?: GasLoggerLockService,
+  ): GasLoggerLockService {
+    if (lockService === undefined) return _GAS_LOGGER_DEFAULT_LOCK_SERVICE;
+
+    if (!lockService || typeof lockService.withLock !== 'function') {
+      throw new Error(
+        '[GasLogger] Invalid "lockService": expected an object exposing withLock(scope, callback, options?), e.g. GasLock. Passing the LockService global from Apps Script rather than GasLock (or a withLock wrapper) is the usual cause.',
+      );
+    }
+
+    return lockService;
   }
 
   // =========================
@@ -78,7 +99,7 @@ class GasLogger {
 
     if (sink.sheet === undefined) {
       try {
-        sink.sheet = this._resolveSheet(sink.config);
+        sink.sheet = this._resolveSheet(sink);
       } catch (error) {
         console.error(
           '[GasLogger] Could not resolve the log sheet; sheet logging is disabled for this execution.',
@@ -97,14 +118,16 @@ class GasLogger {
    * the script lock, so concurrent executions don't race to create it.
    */
   private _resolveSheet(
-    config: GasLoggerSheetConfig,
+    sink: GasLoggerSink,
   ): GoogleAppsScript.Spreadsheet.Sheet {
+    const { config } = sink;
     const spreadsheet = this._resolveSpreadsheet(config);
     const sheetName = config.sheetName || GAS_LOGGER_DEFAULT_SHEET_NAME;
 
     return (
       spreadsheet.getSheetByName(sheetName) ||
       this._withLock(
+        sink,
         () =>
           spreadsheet.getSheetByName(sheetName) ||
           this._insertSheet(spreadsheet, sheetName),
@@ -137,21 +160,14 @@ class GasLogger {
   }
 
   /**
-   * Runs `fn` while holding the script lock, which is released afterwards
-   * even if `fn` throws. Throws if the lock can't be acquired in time.
+   * Runs `fn` while holding the script lock through the sink's lock service,
+   * which releases it afterwards even if `fn` throws. Throws if the lock
+   * can't be acquired in time.
    */
-  private _withLock<T>(fn: () => T): T {
-    const lock = LockService.getScriptLock();
-
-    if (!lock.tryLock(GAS_LOGGER_LOCK_TIMEOUT_MS)) {
-      throw new Error('[GasLogger] Timed out waiting for the script lock.');
-    }
-
-    try {
-      return fn();
-    } finally {
-      lock.releaseLock();
-    }
+  private _withLock<T>(sink: GasLoggerSink, fn: () => T): T {
+    return sink.lockService.withLock('script', fn, {
+      timeoutMs: GAS_LOGGER_LOCK_TIMEOUT_MS,
+    });
   }
 
   /**
@@ -350,7 +366,7 @@ class GasLogger {
     const rowCount = sink.buffer.length;
 
     try {
-      this._withLock(() => {
+      this._withLock(sink, () => {
         const startRow = sheet.getLastRow() + 1;
         const overflow = startRow + rowCount - 1 - sheet.getMaxRows();
 
