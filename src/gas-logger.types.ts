@@ -3,6 +3,19 @@ type GasLoggerLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 type GasLoggerConsoleMethod = 'info' | 'warn' | 'error';
 
 /**
+ * Lock service the logger takes the script lock through. Anything exposing
+ * `withLock` fits, e.g. `GasLock`. `withLock` runs `callback` while holding
+ * the lock and throws if the lock can't be acquired within `timeoutMs`.
+ */
+interface GasLoggerLockService {
+  withLock<T>(
+    scope: 'script',
+    callback: () => T,
+    options?: { timeoutMs?: number },
+  ): T;
+}
+
+/**
  * Sheet state shared by reference between a logger and its children, so
  * the sheet is resolved once and the buffer is common to all of them.
  */
@@ -13,6 +26,7 @@ interface GasLoggerSink {
   buffer: Array<[string, string, string, string]>;
   flushThreshold: number | null;
   bypassBufferLevels: Set<GasLoggerLevel>;
+  lockService: GasLoggerLockService;
 }
 
 type GasLoggerMeta = Record<string, unknown>;
@@ -39,6 +53,13 @@ interface GasLoggerOptions {
   flushThreshold?: number;
   /** Levels that skip the buffer and are appended to the sheet immediately. */
   bypassBufferLevels?: GasLoggerLevel[];
+  /**
+   * Service the script lock is taken through, for sheet creation and
+   * buffered flushes. Pass `GasLock` when the caller holds the script lock
+   * itself, so logging inside that section doesn't end it early. Defaults to
+   * the `GasLock` global when loaded, else Apps Script's `LockService`.
+   */
+  lockService?: GasLoggerLockService;
 }
 
 /** Per-child threshold overrides accepted by `GasLogger.child()`. */

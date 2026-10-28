@@ -13,6 +13,7 @@ export interface GasLoggerTestOptions {
   bindings?: Meta;
   flushThreshold?: number;
   bypassBufferLevels?: Level[];
+  lockService?: unknown;
 }
 
 export interface GasLoggerInstance {
@@ -34,30 +35,41 @@ export type GasLoggerConstructor = new (
 ) => GasLoggerInstance;
 
 /** Source files in load order; later files depend on earlier ones. */
-const SOURCE_FILES = [
+export const SOURCE_FILES = [
   'src/gas-logger.types.ts',
   'src/gas-logger.constants.ts',
   'src/gas-logger.class.ts',
 ];
 
+export const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
 const load = createGasLoader<{ GasLogger: GasLoggerConstructor }>({
   files: SOURCE_FILES,
   exports: ['GasLogger'],
-  root: fileURLToPath(new URL('..', import.meta.url)),
+  root: ROOT,
 });
 
 /**
  * Evaluates the logger sources in a fresh context wired to fake Apps Script
  * services, so each call is isolated from every other.
  */
-export function loadGasLogger(overrides: Partial<Mocks> = {}): {
+export function loadGasLogger(
+  overrides: Partial<Mocks> = {},
+  globals: Record<string, unknown> = {},
+): {
   GasLogger: GasLoggerConstructor;
   mocks: Mocks;
 } {
   const mocks = { ...createMocks(), ...overrides };
   const { SpreadsheetApp, LockService, Logger, console } = mocks;
   return {
-    GasLogger: load({ SpreadsheetApp, LockService, Logger, console }).GasLogger,
+    GasLogger: load({
+      SpreadsheetApp,
+      LockService,
+      Logger,
+      console,
+      ...globals,
+    }).GasLogger,
     mocks,
   };
 }

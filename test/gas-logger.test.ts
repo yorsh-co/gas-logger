@@ -1,6 +1,22 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createGasLoader } from 'gas-dev-config/test';
 import { describe, expect, it, vi } from 'vitest';
-import { loadGasLogger, type GasLoggerTestOptions } from './harness';
-import { FakeSheet, FakeSpreadsheet } from './mocks';
+import {
+  loadGasLogger,
+  ROOT,
+  SOURCE_FILES,
+  type GasLoggerConstructor,
+  type GasLoggerTestOptions,
+} from './harness';
+import {
+  createMocks,
+  createOwnedLockService,
+  createReentrantLockService,
+  FakeSheet,
+  FakeSpreadsheet,
+} from './mocks';
 
 const HEADER = ['timestamp', 'level', 'message', 'meta_json'];
 
@@ -976,5 +992,256 @@ describe('sheet cell safety', () => {
     logger.info(message);
 
     expect(mocks.console.info).toHaveBeenCalledWith(message);
+  });
+});
+
+/** A `withLock` service that runs the callback, with a spy on every call. */
+function createLockService() {
+  const withLock = vi.fn(<T>(scope: string, callback: () => T) => {
+    void scope;
+    return callback();
+  });
+  return { withLock };
+}
+
+describe('injected lock service', () => {
+  it('receives the script scope and timeout for sheet creation', () => {
+    const lockService = createLockService();
+    const { mocks, logger } = setup({ lockService });
+
+    logger.info('msg');
+
+    expect(lockService.withLock).toHaveBeenCalledExactlyOnceWith(
+      'script',
+      expect.any(Function),
+      { timeoutMs: 10000 },
+    );
+    expect(mocks.LockService.getScriptLock).not.toHaveBeenCalled();
+    expect(mocks.activeSpreadsheet.getSheets()).toHaveLength(1);
+  });
+
+  it('receives the script scope and timeout for threshold and bypass flushes', () => {
+    const lockService = createLockService();
+    const { mocks, sheet, logger } = setupBuffered({
+      lockService,
+      flushThreshold: 2,
+      bypassBufferLevels: ['error'],
+    });
+
+    logger.info('a');
+    logger.info('b');
+    logger.error('c');
+
+    expect(lockService.withLock).toHaveBeenCalledTimes(2);
+    expect(lockService.withLock).toHaveBeenNthCalledWith(
+      2,
+      'script',
+      expect.any(Function),
+      { timeoutMs: 10000 },
+    );
+    expect(column(sheet, 2)).toEqual(['a', 'b', 'c']);
+    expect(mocks.LockService.getScriptLock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the LockService global', { getScriptLock: () => ({}) }],
+    ['null', null],
+    ['a string', 'GasLock'],
+    ['a non-function withLock', { withLock: true }],
+  ])('rejects %s', (_label, lockService) => {
+    const { GasLogger } = loadGasLogger();
+
+    expect(() => new GasLogger({ lockService })).toThrow(
+      /^\[GasLogger\] Invalid "lockService".*LockService/,
+    );
+  });
+
+  it('is shared by child loggers', () => {
+    const lockService = createLockService();
+    const { sheet, logger } = setupBuffered({ lockService });
+    const child = logger.child({ route: 'x' });
+
+    child.info('from child');
+    child.flush();
+
+    expect(lockService.withLock).toHaveBeenCalledOnce();
+    expect(column(sheet, 2)).toEqual(['from child']);
+  });
+
+  it('reports a failing service on flush without throwing', () => {
+    const lockService = createLockService();
+    lockService.withLock.mockImplementation(() => {
+      throw new Error('lock timeout');
+    });
+    const { mocks, sheet, logger } = setupBuffered({ lockService });
+
+    logger.info('a');
+    expect(() => logger.flush()).not.toThrow();
+
+    expect(mocks.console.error).toHaveBeenCalledExactlyOnceWith(
+      '[GasLogger] Failed to write 1 row(s) to the log sheet.',
+      expect.objectContaining({ message: 'lock timeout' }),
+    );
+    expect(column(sheet, 2)).toEqual([]);
+  });
+
+  it('reports a failing service on sheet creation and disables the sink', () => {
+    const lockService = createLockService();
+    lockService.withLock.mockImplementation(() => {
+      throw new Error('lock timeout');
+    });
+    const { mocks, logger } = setup({ lockService });
+
+    expect(() => logger.info('msg')).not.toThrow();
+    logger.info('again');
+
+    expect(reports(mocks)).toHaveLength(1);
+    expect(lockService.withLock).toHaveBeenCalledOnce();
+  });
+});
+
+describe('default lock service', () => {
+  it('uses the GasLock global when present', () => {
+    const gasLock = createLockService();
+    const { GasLogger, mocks } = loadGasLogger({}, { GasLock: gasLock });
+
+    new GasLogger({ sheetConfig: { useActiveSpreadsheet: true } }).info('msg');
+
+    expect(gasLock.withLock).toHaveBeenCalledExactlyOnceWith(
+      'script',
+      expect.any(Function),
+      { timeoutMs: 10000 },
+    );
+    expect(mocks.LockService.getScriptLock).not.toHaveBeenCalled();
+  });
+
+  it('resolves GasLock at each acquisition, not at construction', () => {
+    const { GasLogger, mocks } = loadGasLogger();
+    const logger = new GasLogger({
+      sheetConfig: { useActiveSpreadsheet: true },
+    });
+    const gasLock = createLockService();
+    // the library's own realm, where a later-evaluated gas-lock would define it
+    const context = (GasLogger.constructor as FunctionConstructor)(
+      'return globalThis',
+    )() as Record<string, unknown>;
+
+    context.GasLock = gasLock;
+    logger.info('msg');
+
+    expect(gasLock.withLock).toHaveBeenCalledOnce();
+    expect(mocks.LockService.getScriptLock).not.toHaveBeenCalled();
+  });
+
+  it('prefers an injected service over the GasLock global', () => {
+    const gasLock = createLockService();
+    const injected = createLockService();
+    const { GasLogger } = loadGasLogger({}, { GasLock: gasLock });
+
+    new GasLogger({
+      sheetConfig: { useActiveSpreadsheet: true },
+      lockService: injected,
+    }).info('msg');
+
+    expect(injected.withLock).toHaveBeenCalledOnce();
+    expect(gasLock.withLock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the raw script lock when GasLock is absent', () => {
+    const { mocks, logger } = setup();
+
+    logger.info('msg');
+
+    expect(mocks.lock.tryLock).toHaveBeenCalledWith(10000);
+    expect(mocks.lock.releaseLock).toHaveBeenCalledOnce();
+  });
+
+  it('falls back when GasLock has no withLock', () => {
+    const { GasLogger, mocks } = loadGasLogger({}, { GasLock: {} });
+
+    new GasLogger({ sheetConfig: { useActiveSpreadsheet: true } }).info('msg');
+
+    expect(mocks.lock.tryLock).toHaveBeenCalledWith(10000);
+  });
+
+  it('falls back when GasLock is not initialised yet', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gas-logger-'));
+    const trailing = join(dir, 'late-gas-lock.ts');
+    // GasLock is declared after the library already used it, as when
+    // gas-lock's file is evaluated later than a top-level GasLogger: reading
+    // the binding then throws a ReferenceError.
+    writeFileSync(
+      trailing,
+      `new GasLogger({ sheetConfig: { useActiveSpreadsheet: true } }).info('early');
+       const GasLock = { withLock: () => { throw new Error('unexpected'); } };`,
+    );
+    try {
+      const mocks = createMocks();
+      const load = createGasLoader<{ GasLogger: GasLoggerConstructor }>({
+        files: [...SOURCE_FILES, trailing],
+        exports: ['GasLogger'],
+        root: ROOT,
+      });
+
+      expect(() =>
+        load({
+          SpreadsheetApp: mocks.SpreadsheetApp,
+          LockService: mocks.LockService,
+          Logger: mocks.Logger,
+          console: mocks.console,
+        }),
+      ).not.toThrow();
+      expect(mocks.lock.tryLock).toHaveBeenCalledWith(10000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('caller-held script lock', () => {
+  it('survives a buffered flush when GasLock is the lock service', () => {
+    const owned = createOwnedLockService();
+    const gasLock = createReentrantLockService(owned);
+    const { GasLogger, mocks } = loadGasLogger(
+      { LockService: owned.LockService },
+      { GasLock: gasLock },
+    );
+    const sheet = mocks.activeSpreadsheet.insertSheet('log');
+    const logger = new GasLogger({
+      sheetConfig: { useActiveSpreadsheet: true, sheetName: 'log' },
+      flushThreshold: 1,
+    });
+    let heldAfterLog = false;
+
+    gasLock.withLock('script', () => {
+      logger.info('inside');
+      heldAfterLog = owned.isHeld();
+    });
+
+    expect(heldAfterLog).toBe(true);
+    expect(owned.isHeld()).toBe(false);
+    expect(column(sheet, 2)).toEqual(['inside']);
+    expect(reports(mocks)).toEqual([]);
+  });
+
+  it('survives the first sheet creation when GasLock is the lock service', () => {
+    const owned = createOwnedLockService();
+    const gasLock = createReentrantLockService(owned);
+    const { GasLogger, mocks } = loadGasLogger(
+      { LockService: owned.LockService },
+      { GasLock: gasLock },
+    );
+    const logger = new GasLogger({
+      sheetConfig: { useActiveSpreadsheet: true },
+    });
+    let heldAfterLog = false;
+
+    gasLock.withLock('script', () => {
+      logger.info('inside');
+      heldAfterLog = owned.isHeld();
+    });
+
+    expect(heldAfterLog).toBe(true);
+    expect(mocks.activeSpreadsheet.getSheets()).toHaveLength(1);
   });
 });
