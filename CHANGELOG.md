@@ -2,6 +2,20 @@
 
 ---
 
+## [1.3.0] - 2026-10-30
+
+### Added
+
+- Apps Script tests in `gas-test/`, run with gas-dev-config's `gas-test` (`npm run test:gas:build`, `npm run test:gas`)
+- The release `package.json` carries `gasLibrary` load-order metadata for gas-dev-bundle, with gas-lock as a peer
+
+### Changed
+
+- Load order is read from `gasDevConfig.loadOrder` instead of being duplicated in the test harness
+- Bumped gas-dev-config to ^1.4.0 and gas-dev-release to ^1.1.0
+
+---
+
 ## [1.2.0] - 2026-10-28
 
 ### Added
