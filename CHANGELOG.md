@@ -2,6 +2,14 @@
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- README: the `filePushOrder` example uses the `src/lib/` subtree path its text describes, and cross-references use anchors that survive renumbering the steps
+
+---
+
 ## [1.3.1] - 2026-10-30
 
 ### Changed
