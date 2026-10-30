@@ -56,6 +56,41 @@ logger.flush();
 
 #### 1. Add the library to your Apps Script project
 
+##### Several gas-\* libraries: gas-dev-bundle
+
+[gas-dev-bundle](https://github.com/yorsh-co/gas-dev-bundle) resolves version ranges against the libraries' release tags and writes them into one script, in dependency order.
+
+```bash
+npm install -D github:yorsh-co/gas-dev-bundle#semver:^1.1.1
+```
+
+List the libraries in your `package.json`:
+
+```json
+{
+  "gasDevBundle": {
+    "outFile": "src/lib/gas-libraries.js",
+    "libraries": {
+      "gas-logger": "^1.3.0",
+      "gas-lock": "^1.2.0"
+    }
+  }
+}
+```
+
+```bash
+npx gas-dev-bundle
+```
+
+- Commit the generated file. Its header records each library's version and commit SHA.
+- Re-run the command after changing a range to upgrade.
+- Requires `gas-logger` >= 1.3.0, the first release that carries the load-order metadata.
+- Listing `gas-lock` bundles it ahead of `gas-logger`; `gas-logger` uses it for the script lock when present.
+
+See the [gas-dev-bundle README](https://github.com/yorsh-co/gas-dev-bundle) for configuration details.
+
+##### This library only: git subtree
+
 The compiled library is published on a dedicated `dist` branch which contains the .js files, basic documentation and .d.ts types for local autocomplete. Add it to your project as a git subtree.
 
 ```bash
@@ -114,6 +149,8 @@ clasp create --type standalone
 
 #### 5. Import `gas-logger`
 
+To install several gas-\* libraries together, use the [gas-dev-bundle method](#1-add-the-library-to-your-apps-script-project) from the Quick Start; otherwise, add this library with git subtree:
+
 ```bash
 git subtree add \
   --prefix=src/lib/gas-logger \
@@ -151,6 +188,8 @@ src/lib/gas-logger/
 > Use the path where the files land in your pushed project, e.g. `src/lib/gas-logger/...` when pushing the subtree as-is.
 >
 > Alternatively, you can manually move these files to the top of the file list in the Apps Script editor.
+>
+> With gas-dev-bundle, the single entry is the bundle file, e.g. `src/lib/gas-libraries.js` (adjusted for `rootDir`).
 
 #### 7. Push local files to Apps Script
 
