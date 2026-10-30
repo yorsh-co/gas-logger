@@ -54,6 +54,8 @@ logger.flush();
 > [!TIP]
 > Use `gas-logger` together with [Google's `clasp` CLI](https://github.com/google/clasp) for local Apps Script development and git-based workflows. See [Setup instructions with `clasp`](#setup-instructions-with-clasp) for more information.
 
+<a id="add-the-library"></a>
+
 #### 1. Add the library to your Apps Script project
 
 ##### Several gas-\* libraries: gas-dev-bundle
@@ -149,7 +151,7 @@ clasp create --type standalone
 
 #### 5. Import `gas-logger`
 
-To install several gas-\* libraries together, use the [gas-dev-bundle method](#1-add-the-library-to-your-apps-script-project) from the Quick Start; otherwise, add this library with git subtree:
+To install several gas-\* libraries together, use the [gas-dev-bundle method](#add-the-library) from the Quick Start; otherwise, add this library with git subtree:
 
 ```bash
 git subtree add \
@@ -179,8 +181,8 @@ src/lib/gas-logger/
 > ```json
 > {
 >   "filePushOrder": [
->     "dist/lib/gas-logger/gas-logger.constants.js",
->     "dist/lib/gas-logger/gas-logger.class.js"
+>     "src/lib/gas-logger/gas-logger.constants.js",
+>     "src/lib/gas-logger/gas-logger.class.js"
 >   ]
 > }
 > ```
