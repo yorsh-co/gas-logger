@@ -58,10 +58,11 @@ Apps Script works out OAuth scopes by scanning code for service names. `src/gas-
 - Steps:
   1. Mirror the new `GasLoggerSheetConfig` (with its JSDoc) in `peer/gas-logger.peer.types.d.ts`, and remove the three removed fields.
   2. `gas-test/gas-logger.ts`: keep the existing object-form tests. Add one `test('spreadsheet factory', …)` that passes `spreadsheet: () => spreadsheet`, logs twice, asserts the factory was called once and both rows were written, and cleans up the sheet like its neighbours.
+- Phase 3: done. The migration examples are full `new GasLogger({...})` statements, so Prettier keeps them valid.
 - Done when: `npm run typecheck && npm run lint` passes. Running the live suite (`npm run test:gas`) needs clasp credentials; report it to the user as not run, don't run it here.
 - Review: standard
 
-### Phase 3: README — [ ] todo
+### Phase 3: README — [x] done
 
 - Files: `README.md`
 - Steps:

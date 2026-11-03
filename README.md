@@ -17,7 +17,7 @@
 - Six log levels (`trace` < `debug` < `info` < `warn` < `error` < `fatal`) with a configurable minimum `level`
 - Levels and `child()` bindings follow the pino/bunyan model, with a `console.log`-style `(message, meta)` signature rather than pino's object-first order
 - Structured console output — feeds Cloud Logging with a severity and, when `meta` is present, a `jsonPayload`
-- Optional Google Sheets sink: pass `spreadsheet`, `spreadsheetUrl`, `spreadsheetId`, or `useActiveSpreadsheet` in `sheetConfig` to also append each entry as a row in a dedicated log sheet tab
+- Optional Google Sheets sink: pass a `spreadsheet` (an object or a factory function) in `sheetConfig` to also append each entry as a row in a dedicated log sheet tab
 - Independent `sheetLevel` threshold — e.g. stay verbose in Cloud Logging while only writing `warn`+ to the sheet
 - Auto-creates the target sheet if it doesn't exist yet, with a frozen, bold header row and alternating row colors
 - Row buffering via `flushThreshold`, with `bypassBufferLevels` for levels (e.g. `error`, `fatal`) that flush the buffer immediately
@@ -33,7 +33,10 @@
 ```js
 const logger = new GasLogger({
   level: 'info',
-  sheetConfig: { useActiveSpreadsheet: true, sheetName: 'Logs' },
+  sheetConfig: {
+    spreadsheet: () => SpreadsheetApp.getActiveSpreadsheet(),
+    sheetName: 'Logs',
+  },
   flushThreshold: 25, // optionally, buffer log rows to write to the sheet in batches
   bypassBufferLevels: ['error', 'fatal'],
 });
@@ -47,7 +50,7 @@ logger.flush();
 
 ## Requirements
 
-`gas-logger` has no required peer packages. If `sheetConfig` is used, the running script needs access to the target spreadsheet (via the Sheets service, same as any other `SpreadsheetApp` call).
+`gas-logger` has no required peer packages. If `sheetConfig` is used, you supply the spreadsheet yourself, as a `Spreadsheet` object or a function returning one, so the running script needs access to it through your own `SpreadsheetApp` call. See [Scopes](#scopes).
 
 ## Quick Start
 
@@ -235,15 +238,22 @@ Only calls at or above the configured `level` are emitted — with the default `
 ```js
 const logger = new GasLogger({
   sheetConfig: {
-    spreadsheetId: '1AbC...xyz',
+    spreadsheet: () => SpreadsheetApp.openById('1AbC...xyz'),
     sheetName: 'App Logs',
   },
 });
 ```
 
-Pass exactly one of `spreadsheet`, `spreadsheetUrl`, `spreadsheetId`, or `useActiveSpreadsheet` in `sheetConfig` — omitting all four (including `sheetConfig: {}`) defaults to `useActiveSpreadsheet`. If `sheetName` is omitted, the `gas-log` tab is used. If the tab doesn't already exist, `GasLogger` creates it, while holding the script lock, with a frozen, bold header row (`timestamp`, `level`, `message`, `meta_json`) and alternating row banding.
+`spreadsheet` is required and takes one of two forms:
 
-The sheet is resolved on the first write, not in the constructor. Invalid configuration (more than one source, or `useActiveSpreadsheet: false` with no other source) throws when the logger is constructed. Errors that occur while accessing the spreadsheet (e.g. a bad id, no active spreadsheet or a lock timeout) are reported once to `console.error` and disable the sheet sink for the rest of that execution — logging never throws because of the sheet, and console output is unaffected.
+- A `Spreadsheet` object: `spreadsheet: SpreadsheetApp.getActiveSpreadsheet()`.
+- A factory, a function returning a `Spreadsheet`: `spreadsheet: () => SpreadsheetApp.openById('1AbC...xyz')`.
+
+Prefer the factory. It is called on the first write, not at construction, so a logger declared in global scope doesn't open the spreadsheet on every execution, and a `doGet` or `doPost` handler with no active spreadsheet doesn't fail just because the logger exists. The factory runs at most once per execution; the result is cached and shared with child loggers.
+
+If `sheetName` is omitted, the `gas-log` tab is used. If the tab doesn't already exist, `GasLogger` creates it, while holding the script lock, with a frozen, bold header row (`timestamp`, `level`, `message`, `meta_json`) and alternating row banding.
+
+Invalid configuration (a missing or invalid `spreadsheet`, including `sheetConfig: {}`, or a removed 1.x option) throws when the logger is constructed. Errors that occur while accessing the spreadsheet (e.g. a factory that throws or returns `null`, or a lock timeout) are reported once to `console.error` and disable the sheet sink for the rest of that execution — logging never throws because of the sheet, and console output is unaffected.
 
 > [!NOTE]
 > Omitting `sheetConfig` entirely disables the sheet sink — logs still go to `console`.
@@ -254,7 +264,10 @@ The sheet is resolved on the first write, not in the constructor. Invalid config
 const logger = new GasLogger({
   level: 'info', // console/Cloud Logging threshold
   sheetLevel: 'warn', // sheet threshold
-  sheetConfig: { useActiveSpreadsheet: true, sheetName: 'App Logs' },
+  sheetConfig: {
+    spreadsheet: () => SpreadsheetApp.getActiveSpreadsheet(),
+    sheetName: 'App Logs',
+  },
 });
 
 logger.info('Polling for status'); // console only — below sheetLevel
@@ -267,7 +280,7 @@ logger.warn('Retrying after failure'); // console + sheet
 
 ```js
 const logger = new GasLogger({
-  sheetConfig: { useActiveSpreadsheet: true },
+  sheetConfig: { spreadsheet: () => SpreadsheetApp.getActiveSpreadsheet() },
   flushThreshold: 25,
   bypassBufferLevels: ['error', 'fatal'],
 });
@@ -281,7 +294,7 @@ Batched flushes hold the script lock while writing, so concurrent executions don
 
 ```js
 const logger = new GasLogger({
-  sheetConfig: { useActiveSpreadsheet: true },
+  sheetConfig: { spreadsheet: () => SpreadsheetApp.getActiveSpreadsheet() },
   flushThreshold: 25,
   lockService: GasLock,
 });
@@ -334,6 +347,32 @@ When `sheetConfig` is provided, each log call is also appended as a row (`timest
 
 Logging never throws because of a sheet write. If a write fails (e.g. the script lock times out or a quota is hit), the error is reported to `console.error` and the affected rows are dropped; later entries are still written.
 
+### Scopes
+
+`gas-logger` names no Google document service in its source, so bundling it doesn't add a Sheets scope to your project. The scope comes only from your own `SpreadsheetApp` call, the one that builds the `spreadsheet` you pass in. A project that never logs to a sheet requests no spreadsheet access. To narrow the scope to the bound spreadsheet, add `/** @OnlyCurrentDoc */` to your own code, which requests `spreadsheets.currentonly` instead of full spreadsheet access.
+
+### Migrating from 1.x
+
+2.0.0 removes `spreadsheetUrl`, `spreadsheetId` and `useActiveSpreadsheet`; constructing a logger with any of them throws. Pass `spreadsheet` instead. A `spreadsheet` object keeps working unchanged.
+
+```js
+// Before
+new GasLogger({ sheetConfig: { spreadsheetUrl: URL } });
+new GasLogger({ sheetConfig: { spreadsheetId: ID } });
+new GasLogger({ sheetConfig: { useActiveSpreadsheet: true } });
+
+// After
+new GasLogger({
+  sheetConfig: { spreadsheet: () => SpreadsheetApp.openByUrl(URL) },
+});
+new GasLogger({
+  sheetConfig: { spreadsheet: () => SpreadsheetApp.openById(ID) },
+});
+new GasLogger({
+  sheetConfig: { spreadsheet: () => SpreadsheetApp.getActiveSpreadsheet() },
+});
+```
+
 ## Development
 
 The source code is written in TypeScript.
@@ -342,7 +381,7 @@ Release builds are compiled to JavaScript before publishing so the distributed l
 
 ### Apps Script tests
 
-The Vitest suite runs against in-memory fakes of `SpreadsheetApp` and `LockService`. `gas-test/gas-logger.ts` checks the platform behaviour they stand in for in a real Apps Script execution: sheet output (creation, buffered flushes, growing the sheet), locking with [GasLock](https://github.com/yorsh-co/gas-lock), formula escaping and truncation. They are built and run with [gas-dev-config](https://github.com/yorsh-co/gas-dev-config#apps-script-tests)'s `gas-test`; see its README for the one-off setup.
+The Vitest suite runs against in-memory fakes of `Spreadsheet` and `LockService`. `gas-test/gas-logger.ts` checks the platform behaviour they stand in for in a real Apps Script execution: sheet output (creation, buffered flushes, growing the sheet), locking with [GasLock](https://github.com/yorsh-co/gas-lock), formula escaping and truncation. They are built and run with [gas-dev-config](https://github.com/yorsh-co/gas-dev-config#apps-script-tests)'s `gas-test`; see its README for the one-off setup.
 
 - `npm run test:gas:build` writes a single script, with gas-lock bundled in; paste it into the Apps Script editor and run `runGasTests`.
 - `npm run test:gas` pushes it to a dedicated test project with clasp and prints the results. It needs `clasp login`, `GAS_TEST_SCRIPT_ID` and `GAS_TEST_SPREADSHEET_ID`; the project's contents are replaced, and the test sheets are deleted from the spreadsheet after the run.
