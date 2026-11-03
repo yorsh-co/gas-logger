@@ -1,6 +1,7 @@
 # Node / NPM
 node_modules/
 
-# dist
+#
 dist/
 .worktrees/
+.ignore
