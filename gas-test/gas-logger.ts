@@ -106,6 +106,26 @@ test('sheet creation', ({ prefix, spreadsheet }) => {
   assertMessages(sheet, ['first', 'second']);
 });
 
+test('spreadsheet factory', ({ prefix, spreadsheet }) => {
+  const name = `${prefix}factory`;
+  let calls = 0;
+  const logger = new GasLogger({
+    sheetConfig: {
+      spreadsheet: () => {
+        calls += 1;
+        return spreadsheet;
+      },
+      sheetName: name,
+    },
+  });
+
+  logger.info('one');
+  logger.info('two');
+
+  assert(calls === 1, `factory should run once, ran ${calls} times`);
+  assertMessages(requireSheet(spreadsheet, name), ['one', 'two']);
+});
+
 test('creation takes the lock', ({ prefix, spreadsheet }) => {
   const { calls, heldInside, lockService } = recordingLockService();
   const logger = newLogger(spreadsheet, `${prefix}lock-create`, {

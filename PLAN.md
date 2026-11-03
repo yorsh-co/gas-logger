@@ -52,7 +52,7 @@ Apps Script works out OAuth scopes by scanning code for service names. `src/gas-
 - Done when: `npx vitest run` passes; `grep -rE '\bSpreadsheetApp\b' src` finds nothing; `npm run typecheck` passes.
 - Review: deep. It changes the OAuth scope surface and the public config contract.
 
-### Phase 2: Peer types and live Apps Script tests — [ ] todo
+### Phase 2: Peer types and live Apps Script tests — [x] done
 
 - Files: `peer/gas-logger.peer.types.d.ts`, `gas-test/gas-logger.ts`
 - Steps:
@@ -78,6 +78,7 @@ Apps Script works out OAuth scopes by scanning code for service names. `src/gas-
 ## Log
 
 - Phase 1: done. Deep review fixes: a primitive `sheetConfig` now throws the `[GasLogger]` error; the message says "were" for several removed options. The CHANGELOG entry is deferred to final review.
+- Phase 2: done. `npm run test:gas` not run (needs clasp credentials), so the new factory test hasn't run on Apps Script. Its sheet is cleaned up through the prefix, like its neighbours.
 
 ## Open questions
 
