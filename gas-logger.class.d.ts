@@ -18,9 +18,9 @@ declare class GasLogger {
    */
   private _resolveLockService;
   /**
-   * Validates the spreadsheet source options of a sheet config.
-   * Throws if more than one source is passed, or if
-   * `useActiveSpreadsheet` is false and no other source is passed.
+   * Validates a sheet config. Throws if a spreadsheet option removed in
+   * 2.0.0 is present, or if `spreadsheet` is neither a Spreadsheet nor a
+   * function.
    */
   private _validateSheetConfig;
   /**
@@ -37,8 +37,8 @@ declare class GasLogger {
    */
   private _resolveSheet;
   /**
-   * Resolve the spreadsheet from the provided source option, defaulting
-   * to the active spreadsheet.
+   * Resolve the spreadsheet from the configured option, calling it when it
+   * is a factory. Throws if a factory returns no spreadsheet.
    */
   private _resolveSpreadsheet;
   /**
