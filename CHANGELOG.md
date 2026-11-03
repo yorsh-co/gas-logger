@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Breaking
+
+- `sheetConfig.spreadsheetUrl`, `spreadsheetId` and `useActiveSpreadsheet` are removed and now throw a migration error at construction; `sheetConfig.spreadsheet` is required and accepts a `Spreadsheet` or a function returning one (called lazily, once per execution). See "Migrating from 1.x" in the README
+
+### Fixed
+
+- Bundling gas-logger no longer adds the Sheets OAuth scope to consumers that don't log to a sheet
+
 ### Changed
 
 - README: the `filePushOrder` example uses the `src/lib/` subtree path its text describes, and cross-references use anchors that survive renumbering the steps
