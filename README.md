@@ -246,7 +246,7 @@ const logger = new GasLogger({
 
 `spreadsheet` is required and takes one of two forms:
 
-- A `Spreadsheet` object: `spreadsheet: SpreadsheetApp.getActiveSpreadsheet()`.
+- A `Spreadsheet` object: `spreadsheet: SpreadsheetApp.getActiveSpreadsheet()`. The object form needs a non-null `Spreadsheet` at construction: `getActiveSpreadsheet()` returns `null` where there is no active spreadsheet (e.g. a standalone `doGet`), and the constructor then throws, so use the factory form there.
 - A factory, a function returning a `Spreadsheet`: `spreadsheet: () => SpreadsheetApp.openById('1AbC...xyz')`.
 
 Prefer the factory. It is called on the first write, not at construction, so a logger declared in global scope doesn't open the spreadsheet on every execution, and a `doGet` or `doPost` handler with no active spreadsheet doesn't fail just because the logger exists. The factory runs at most once per execution; the result is cached and shared with child loggers.
