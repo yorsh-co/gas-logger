@@ -213,17 +213,6 @@ export function createMocks() {
   return {
     activeSpreadsheet,
     lock,
-    SpreadsheetApp: {
-      getActiveSpreadsheet: vi.fn(
-        (): FakeSpreadsheet | null => activeSpreadsheet,
-      ),
-      openById: vi.fn((id: string): FakeSpreadsheet => {
-        throw new Error(`Unexpected openById("${id}")`);
-      }),
-      openByUrl: vi.fn((url: string): FakeSpreadsheet => {
-        throw new Error(`Unexpected openByUrl("${url}")`);
-      }),
-    },
     LockService: { getScriptLock: vi.fn(() => lock) },
     Logger: { log: vi.fn() },
     console: {

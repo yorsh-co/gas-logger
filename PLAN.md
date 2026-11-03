@@ -23,7 +23,7 @@ Apps Script works out OAuth scopes by scanning code for service names. `src/gas-
 
 ## Phases
 
-### Phase 1: Spreadsheet object or factory; remove the named-service sources — [ ] todo
+### Phase 1: Spreadsheet object or factory; remove the named-service sources — [x] done
 
 - Files: `test/scopes.test.ts` (new), `src/gas-logger.types.ts`, `src/gas-logger.class.ts`, `test/gas-logger.test.ts`, `test/mocks.ts`, `test/harness.ts`
 - Steps:
@@ -76,6 +76,8 @@ Apps Script works out OAuth scopes by scanning code for service names. `src/gas-
 - Review: standard
 
 ## Log
+
+- Phase 1: done. Deep review fixes: a primitive `sheetConfig` now throws the `[GasLogger]` error; the message says "were" for several removed options. The CHANGELOG entry is deferred to final review.
 
 ## Open questions
 
