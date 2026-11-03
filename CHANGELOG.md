@@ -2,6 +2,14 @@
 
 ---
 
+## [2.0.1] - 2026-11-03
+
+### Fixed
+
+- The `@version` header of `peer/gas-logger.peer.types.d.ts` tracks the package version; it still read 1.2.0 in 2.0.0, though the declarations matched the 2.0.0 surface
+
+---
+
 ## [2.0.0] - 2026-11-03
 
 ### Breaking
