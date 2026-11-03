@@ -57,33 +57,37 @@ class GasLogger {
   // =========================
 
   /**
-   * Validates the spreadsheet source options of a sheet config.
-   * Throws if more than one source is passed, or if
-   * `useActiveSpreadsheet` is false and no other source is passed.
+   * Validates a sheet config. Throws if a spreadsheet option removed in
+   * 2.0.0 is present, or if `spreadsheet` is neither a Spreadsheet nor a
+   * function.
    */
   private _validateSheetConfig(config: GasLoggerSheetConfig): void {
-    const { spreadsheet, spreadsheetUrl, spreadsheetId, useActiveSpreadsheet } =
-      config;
+    const required =
+      '[GasLogger] "sheetConfig.spreadsheet" is required: pass a Spreadsheet, or a function returning one.';
 
-    const sources: Record<string, boolean> = {
-      spreadsheet: !!spreadsheet,
-      spreadsheetUrl: !!spreadsheetUrl,
-      spreadsheetId: !!spreadsheetId,
-      useActiveSpreadsheet: !!useActiveSpreadsheet,
-    };
+    if (typeof config !== 'object' || config === null) {
+      throw new Error(required);
+    }
 
-    const selected = Object.keys(sources).filter((k) => sources[k]);
+    const removed = [
+      'spreadsheetUrl',
+      'spreadsheetId',
+      'useActiveSpreadsheet',
+    ].filter((name) => name in config);
 
-    if (selected.length > 1) {
+    if (removed.length > 0) {
       throw new Error(
-        `[GasLogger] Received more than one spreadsheet source option: ${selected.join(', ')}. Pass exactly one of "spreadsheet", "spreadsheetUrl", "spreadsheetId" or "useActiveSpreadsheet".`,
+        `[GasLogger] ${removed.map((name) => `"${name}"`).join(', ')} ${removed.length > 1 ? 'were' : 'was'} removed in 2.0.0. Pass "spreadsheet" instead: a Spreadsheet, or a function returning one. See the README "Migrating from 1.x" section.`,
       );
     }
 
-    if (useActiveSpreadsheet === false && selected.length === 0) {
-      throw new Error(
-        '[GasLogger] "useActiveSpreadsheet" is false, so a spreadsheet source is required. Pass "spreadsheet", "spreadsheetUrl" or "spreadsheetId".',
-      );
+    const { spreadsheet } = config;
+    const valid =
+      typeof spreadsheet === 'function' ||
+      (typeof spreadsheet === 'object' && spreadsheet !== null);
+
+    if (!valid) {
+      throw new Error(required);
     }
   }
 
@@ -136,27 +140,23 @@ class GasLogger {
   }
 
   /**
-   * Resolve the spreadsheet from the provided source option, defaulting
-   * to the active spreadsheet.
+   * Resolve the spreadsheet from the configured option, calling it when it
+   * is a factory. Throws if a factory returns no spreadsheet.
    */
   private _resolveSpreadsheet(
     config: GasLoggerSheetConfig,
   ): GoogleAppsScript.Spreadsheet.Spreadsheet {
-    const { spreadsheet, spreadsheetUrl, spreadsheetId } = config;
+    const { spreadsheet } = config;
+    const resolved =
+      typeof spreadsheet === 'function' ? spreadsheet() : spreadsheet;
 
-    if (spreadsheet) return spreadsheet;
-    if (spreadsheetUrl) return SpreadsheetApp.openByUrl(spreadsheetUrl);
-    if (spreadsheetId) return SpreadsheetApp.openById(spreadsheetId);
-
-    const activeSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-
-    if (!activeSpreadsheet) {
+    if (!resolved) {
       throw new Error(
-        '[GasLogger] No active spreadsheet is accessible by this script. Pass "spreadsheet", "spreadsheetUrl" or "spreadsheetId" instead.',
+        '[GasLogger] The "spreadsheet" function returned no spreadsheet.',
       );
     }
 
-    return activeSpreadsheet;
+    return resolved;
   }
 
   /**

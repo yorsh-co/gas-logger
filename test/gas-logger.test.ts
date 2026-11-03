@@ -20,11 +20,11 @@ import {
 
 const HEADER = ['timestamp', 'level', 'message', 'meta_json'];
 
-/** Loads a logger writing to the active spreadsheet. */
+/** Loads a logger writing to the fake spreadsheet. */
 function setup(options: GasLoggerTestOptions = {}) {
   const { GasLogger, mocks } = loadGasLogger();
   const logger = new GasLogger({
-    sheetConfig: { useActiveSpreadsheet: true },
+    sheetConfig: { spreadsheet: mocks.activeSpreadsheet },
     ...options,
   });
   return { GasLogger, mocks, logger };
@@ -248,72 +248,75 @@ describe('buffering', () => {
 });
 
 describe('spreadsheet source', () => {
-  it('uses the provided spreadsheet', () => {
-    const { GasLogger, mocks } = loadGasLogger();
+  it('writes rows to a spreadsheet object', () => {
+    const { GasLogger } = loadGasLogger();
     const spreadsheet = new FakeSpreadsheet();
 
     new GasLogger({ sheetConfig: { spreadsheet } }).info('msg');
 
-    expect(mocks.SpreadsheetApp.getActiveSpreadsheet).not.toHaveBeenCalled();
     expect(dataRows(logSheet(spreadsheet))).toHaveLength(1);
   });
 
-  it('opens by url', () => {
-    const { GasLogger, mocks } = loadGasLogger();
+  it('writes rows to the spreadsheet returned by a factory', () => {
+    const { GasLogger } = loadGasLogger();
     const spreadsheet = new FakeSpreadsheet();
-    mocks.SpreadsheetApp.openByUrl.mockReturnValue(spreadsheet);
 
-    new GasLogger({ sheetConfig: { spreadsheetUrl: 'u' } }).info('msg');
+    new GasLogger({ sheetConfig: { spreadsheet: () => spreadsheet } }).info(
+      'msg',
+    );
 
-    expect(mocks.SpreadsheetApp.openByUrl).toHaveBeenCalledWith('u');
     expect(dataRows(logSheet(spreadsheet))).toHaveLength(1);
   });
 
-  it('opens by id', () => {
-    const { GasLogger, mocks } = loadGasLogger();
-    const spreadsheet = new FakeSpreadsheet();
-    mocks.SpreadsheetApp.openById.mockReturnValue(spreadsheet);
+  it.each(['spreadsheetUrl', 'spreadsheetId', 'useActiveSpreadsheet'])(
+    'throws a migration error for the removed "%s" option',
+    (option) => {
+      const { GasLogger } = loadGasLogger();
+      const sheetConfig = { [option]: true } as never;
 
-    new GasLogger({ sheetConfig: { spreadsheetId: 'i' } }).info('msg');
+      expect(() => new GasLogger({ sheetConfig })).toThrow(
+        new RegExp(`\\[GasLogger\\] "${option}" was removed in 2\\.0\\.0`),
+      );
+    },
+  );
 
-    expect(mocks.SpreadsheetApp.openById).toHaveBeenCalledWith('i');
-    expect(dataRows(logSheet(spreadsheet))).toHaveLength(1);
+  it('names every removed option that is passed', () => {
+    const { GasLogger } = loadGasLogger();
+    const sheetConfig = { spreadsheetId: 'i', spreadsheetUrl: 'u' } as never;
+
+    expect(() => new GasLogger({ sheetConfig })).toThrow(
+      /"spreadsheetUrl", "spreadsheetId" were removed/,
+    );
   });
 
-  it('uses the active spreadsheet', () => {
-    const { mocks, logger } = setup();
+  it('throws when the spreadsheet is missing', () => {
+    const { GasLogger } = loadGasLogger();
 
-    logger.info('msg');
-
-    expect(dataRows(logSheet(mocks.activeSpreadsheet))).toHaveLength(1);
+    expect(() => new GasLogger({ sheetConfig: {} as never })).toThrow(
+      /"sheetConfig.spreadsheet" is required/,
+    );
   });
 
-  it('throws when more than one source is given', () => {
+  it.each([
+    ['a string', 'id'],
+    ['true', true],
+  ])('throws when sheetConfig is %s', (_label, sheetConfig) => {
+    const { GasLogger } = loadGasLogger();
+
+    expect(() => new GasLogger({ sheetConfig: sheetConfig as never })).toThrow(
+      /"sheetConfig.spreadsheet" is required/,
+    );
+  });
+
+  it.each([
+    ['a string', 'id'],
+    ['null', null],
+  ])('throws when the spreadsheet is %s', (_label, spreadsheet) => {
     const { GasLogger } = loadGasLogger();
 
     expect(
-      () =>
-        new GasLogger({
-          sheetConfig: { spreadsheetId: 'i', spreadsheetUrl: 'u' },
-        }),
-    ).toThrow(/more than one spreadsheet source/);
-  });
-
-  it('reports and disables the sheet sink when there is no active spreadsheet', () => {
-    const { GasLogger, mocks } = loadGasLogger();
-    mocks.SpreadsheetApp.getActiveSpreadsheet.mockReturnValue(null);
-    const logger = new GasLogger({
-      sheetConfig: { useActiveSpreadsheet: true },
-    });
-
-    expect(() => logger.info('msg')).not.toThrow();
-
-    expect(mocks.console.error).toHaveBeenCalledExactlyOnceWith(
-      expect.stringContaining('[GasLogger]'),
-      expect.objectContaining({
-        message: expect.stringContaining('No active spreadsheet'),
-      }),
-    );
+      () => new GasLogger({ sheetConfig: { spreadsheet } as never }),
+    ).toThrow(/"sheetConfig.spreadsheet" is required/);
   });
 });
 
@@ -323,7 +326,7 @@ describe('sheet resolution', () => {
     const existing = mocks.activeSpreadsheet.insertSheet('audit');
 
     new GasLogger({
-      sheetConfig: { useActiveSpreadsheet: true, sheetName: 'audit' },
+      sheetConfig: { spreadsheet: mocks.activeSpreadsheet, sheetName: 'audit' },
     }).info('msg');
 
     expect(mocks.activeSpreadsheet.getSheets()).toEqual([existing]);
@@ -357,111 +360,83 @@ describe('sheet resolution', () => {
 });
 
 describe('lazy sheet resolution', () => {
-  it('opens the spreadsheet on first write, not in the constructor', () => {
+  it('calls the factory on first write, not in the constructor', () => {
     const { GasLogger, mocks } = loadGasLogger();
+    const factory = vi.fn(() => mocks.activeSpreadsheet);
 
-    const logger = new GasLogger({
-      sheetConfig: { useActiveSpreadsheet: true },
-    });
-    expect(mocks.SpreadsheetApp.getActiveSpreadsheet).not.toHaveBeenCalled();
+    const logger = new GasLogger({ sheetConfig: { spreadsheet: factory } });
+    expect(factory).not.toHaveBeenCalled();
     expect(mocks.LockService.getScriptLock).not.toHaveBeenCalled();
 
     logger.info('msg');
-    expect(mocks.SpreadsheetApp.getActiveSpreadsheet).toHaveBeenCalled();
+    expect(factory).toHaveBeenCalledTimes(1);
   });
 
-  it('does not throw from the constructor when the source fails', () => {
+  it('calls the factory once across writes and child loggers', () => {
     const { GasLogger, mocks } = loadGasLogger();
-    mocks.SpreadsheetApp.openById.mockImplementation(() => {
-      throw new Error('No item with the given ID could be found.');
-    });
+    const factory = vi.fn(() => mocks.activeSpreadsheet);
+    const logger = new GasLogger({ sheetConfig: { spreadsheet: factory } });
+    const child = logger.child({ b: 2 });
 
-    expect(
-      () => new GasLogger({ sheetConfig: { spreadsheetId: 'missing' } }),
-    ).not.toThrow();
+    logger.info('one');
+    logger.info('two');
+    child.info('three');
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(mocks.activeSpreadsheet.getSheets()).toHaveLength(1);
+    expect(dataRows(logSheet(mocks.activeSpreadsheet))).toHaveLength(3);
   });
 
-  it('reports a resolution failure once and does not retry', () => {
-    const { GasLogger, mocks } = loadGasLogger();
-    mocks.SpreadsheetApp.openById.mockImplementation(() => {
-      throw new Error('boom');
-    });
-    const logger = new GasLogger({
-      level: 'fatal',
-      sheetConfig: { spreadsheetId: 'missing' },
-    });
+  it.each([
+    ['returns null', () => null, 'returned no spreadsheet'],
+    [
+      'throws',
+      () => {
+        throw new Error('boom');
+      },
+      'boom',
+    ],
+  ])(
+    'reports a factory that %s once and disables the sink',
+    (_l, impl, text) => {
+      const { GasLogger, mocks } = loadGasLogger();
+      const factory = vi.fn(impl);
+      const logger = new GasLogger({
+        sheetConfig: { spreadsheet: factory as never },
+      });
 
-    logger.fatal('first');
-    logger.fatal('second');
+      expect(() => logger.info('first')).not.toThrow();
+      logger.info('second');
 
-    expect(mocks.SpreadsheetApp.openById).toHaveBeenCalledTimes(1);
-    const reports = mocks.console.error.mock.calls.filter(
-      ([first]) => typeof first === 'string' && first.startsWith('[GasLogger]'),
-    );
-    expect(reports).toHaveLength(1);
-  });
-
-  it('keeps logging to the console after the sheet sink is disabled', () => {
-    const { GasLogger, mocks } = loadGasLogger();
-    mocks.SpreadsheetApp.getActiveSpreadsheet.mockReturnValue(null);
-    const logger = new GasLogger({ sheetConfig: {} });
-
-    logger.info('first');
-    logger.info('second');
-
-    expect(mocks.console.info).toHaveBeenNthCalledWith(1, 'first');
-    expect(mocks.console.info).toHaveBeenNthCalledWith(2, 'second');
-  });
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(mocks.console.error).toHaveBeenCalledExactlyOnceWith(
+        expect.stringContaining('[GasLogger]'),
+        expect.objectContaining({ message: expect.stringContaining(text) }),
+      );
+      expect(mocks.console.info).toHaveBeenNthCalledWith(2, 'second');
+    },
+  );
 
   it('does not resolve the sheet for entries below sheetLevel', () => {
     const { GasLogger, mocks } = loadGasLogger();
+    const factory = vi.fn(() => mocks.activeSpreadsheet);
     const logger = new GasLogger({
       sheetLevel: 'error',
-      sheetConfig: { useActiveSpreadsheet: true },
+      sheetConfig: { spreadsheet: factory },
     });
 
     logger.info('console only');
-    expect(mocks.SpreadsheetApp.getActiveSpreadsheet).not.toHaveBeenCalled();
+    expect(factory).not.toHaveBeenCalled();
 
     logger.error('sheet');
-    expect(mocks.SpreadsheetApp.getActiveSpreadsheet).toHaveBeenCalledTimes(1);
-  });
-
-  it('shares the sheet resolved by the parent with a child created earlier', () => {
-    const { mocks, logger } = setup();
-    const child = logger.child({ b: 2 });
-
-    logger.info('parent');
-    child.info('child');
-
-    expect(mocks.SpreadsheetApp.getActiveSpreadsheet).toHaveBeenCalledTimes(1);
-    expect(mocks.activeSpreadsheet.getSheets()).toHaveLength(1);
-    expect(dataRows(logSheet(mocks.activeSpreadsheet))).toHaveLength(2);
-  });
-});
-
-describe('sheetConfig semantics', () => {
-  it('an empty sheetConfig enables the sheet on the active spreadsheet', () => {
-    const { GasLogger, mocks } = loadGasLogger();
-
-    new GasLogger({ sheetConfig: {} }).info('msg');
-
-    expect(mocks.activeSpreadsheet.getSheets()).toHaveLength(1);
-  });
-
-  it('throws when useActiveSpreadsheet is false without another source', () => {
-    const { GasLogger } = loadGasLogger();
-
-    expect(
-      () => new GasLogger({ sheetConfig: { useActiveSpreadsheet: false } }),
-    ).toThrow(/\[GasLogger\].*source is required/);
+    expect(factory).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('default sheet', () => {
   it('reuses a single default "gas-log" tab across loggers', () => {
     const { GasLogger, mocks } = loadGasLogger();
-    const config = { useActiveSpreadsheet: true };
+    const config = { spreadsheet: mocks.activeSpreadsheet };
 
     new GasLogger({ sheetConfig: config }).info('a');
     new GasLogger({ sheetConfig: config }).info('b');
@@ -479,7 +454,7 @@ describe('sheet creation lock', () => {
     mocks.activeSpreadsheet.getSheetByName.mockReturnValueOnce(null);
 
     new GasLogger({
-      sheetConfig: { useActiveSpreadsheet: true, sheetName: 'log' },
+      sheetConfig: { spreadsheet: mocks.activeSpreadsheet, sheetName: 'log' },
     }).info('msg');
 
     expect(existing.values.map((row) => row[2])).toContain('msg');
@@ -489,7 +464,9 @@ describe('sheet creation lock', () => {
     const { GasLogger, mocks } = loadGasLogger();
     mocks.activeSpreadsheet.insertSheet('gas-log');
 
-    new GasLogger({ sheetConfig: {} }).info('msg');
+    new GasLogger({
+      sheetConfig: { spreadsheet: mocks.activeSpreadsheet },
+    }).info('msg');
 
     expect(mocks.LockService.getScriptLock).not.toHaveBeenCalled();
   });
@@ -537,7 +514,7 @@ function setupOnSheet(options: GasLoggerTestOptions = {}) {
   const { GasLogger, mocks } = loadGasLogger();
   const sheet = mocks.activeSpreadsheet.insertSheet('log');
   const logger = new GasLogger({
-    sheetConfig: { useActiveSpreadsheet: true, sheetName: 'log' },
+    sheetConfig: { spreadsheet: mocks.activeSpreadsheet, sheetName: 'log' },
     ...options,
   });
   return { mocks, sheet, logger };
@@ -1105,7 +1082,9 @@ describe('default lock service', () => {
     const gasLock = createLockService();
     const { GasLogger, mocks } = loadGasLogger({}, { GasLock: gasLock });
 
-    new GasLogger({ sheetConfig: { useActiveSpreadsheet: true } }).info('msg');
+    new GasLogger({
+      sheetConfig: { spreadsheet: mocks.activeSpreadsheet },
+    }).info('msg');
 
     expect(gasLock.withLock).toHaveBeenCalledExactlyOnceWith(
       'script',
@@ -1118,7 +1097,7 @@ describe('default lock service', () => {
   it('resolves GasLock at each acquisition, not at construction', () => {
     const { GasLogger, mocks } = loadGasLogger();
     const logger = new GasLogger({
-      sheetConfig: { useActiveSpreadsheet: true },
+      sheetConfig: { spreadsheet: mocks.activeSpreadsheet },
     });
     const gasLock = createLockService();
     // the library's own realm, where a later-evaluated gas-lock would define it
@@ -1136,10 +1115,10 @@ describe('default lock service', () => {
   it('prefers an injected service over the GasLock global', () => {
     const gasLock = createLockService();
     const injected = createLockService();
-    const { GasLogger } = loadGasLogger({}, { GasLock: gasLock });
+    const { GasLogger, mocks } = loadGasLogger({}, { GasLock: gasLock });
 
     new GasLogger({
-      sheetConfig: { useActiveSpreadsheet: true },
+      sheetConfig: { spreadsheet: mocks.activeSpreadsheet },
       lockService: injected,
     }).info('msg');
 
@@ -1159,7 +1138,9 @@ describe('default lock service', () => {
   it('falls back when GasLock has no withLock', () => {
     const { GasLogger, mocks } = loadGasLogger({}, { GasLock: {} });
 
-    new GasLogger({ sheetConfig: { useActiveSpreadsheet: true } }).info('msg');
+    new GasLogger({
+      sheetConfig: { spreadsheet: mocks.activeSpreadsheet },
+    }).info('msg');
 
     expect(mocks.lock.tryLock).toHaveBeenCalledWith(10000);
   });
@@ -1172,7 +1153,7 @@ describe('default lock service', () => {
     // the binding then throws a ReferenceError.
     writeFileSync(
       trailing,
-      `new GasLogger({ sheetConfig: { useActiveSpreadsheet: true } }).info('early');
+      `new GasLogger({ sheetConfig: { spreadsheet: activeSpreadsheet } }).info('early');
        const GasLock = { withLock: () => { throw new Error('unexpected'); } };`,
     );
     try {
@@ -1185,7 +1166,7 @@ describe('default lock service', () => {
 
       expect(() =>
         load({
-          SpreadsheetApp: mocks.SpreadsheetApp,
+          activeSpreadsheet: mocks.activeSpreadsheet,
           LockService: mocks.LockService,
           Logger: mocks.Logger,
           console: mocks.console,
@@ -1208,7 +1189,7 @@ describe('caller-held script lock', () => {
     );
     const sheet = mocks.activeSpreadsheet.insertSheet('log');
     const logger = new GasLogger({
-      sheetConfig: { useActiveSpreadsheet: true, sheetName: 'log' },
+      sheetConfig: { spreadsheet: mocks.activeSpreadsheet, sheetName: 'log' },
       flushThreshold: 1,
     });
     let heldAfterLog = false;
@@ -1232,7 +1213,7 @@ describe('caller-held script lock', () => {
       { GasLock: gasLock },
     );
     const logger = new GasLogger({
-      sheetConfig: { useActiveSpreadsheet: true },
+      sheetConfig: { spreadsheet: mocks.activeSpreadsheet },
     });
     let heldAfterLog = false;
 

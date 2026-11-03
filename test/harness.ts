@@ -57,10 +57,9 @@ export function loadGasLogger(
   mocks: Mocks;
 } {
   const mocks = { ...createMocks(), ...overrides };
-  const { SpreadsheetApp, LockService, Logger, console } = mocks;
+  const { LockService, Logger, console } = mocks;
   return {
     GasLogger: load({
-      SpreadsheetApp,
       LockService,
       Logger,
       console,
