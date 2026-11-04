@@ -2,6 +2,14 @@
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- The vendored gas-lock peer declarations are re-copied from gas-lock 1.2.2
+
+---
+
 ## [2.0.2] - 2026-11-04
 
 ### Changed
