@@ -9,6 +9,10 @@
 - Peer type declarations are synced with `gas-dev-config peers sync`; `peers:check` script added
 - The peer declarations' usage header points consumers at `gas-dev-config peers sync` instead of a manual copy
 
+### Fixed
+
+- Overrides transitive `minimatch` to `^11.0.1` (GHSA-g3hv-75wg-m249) and `gaxios` to `^7.3.1` (drops `rimraf` 5 → `glob` 10); `rimraf` is updated to `6.1.4` in the lockfile to clear `glob` 13 (GHSA-3g3m-2fjr-6pw4); `zod` via `@google/clasp` is accepted risk; see `gas-dev-config` ADR 0005
+
 ---
 
 ## [2.0.3] - 2026-11-04
