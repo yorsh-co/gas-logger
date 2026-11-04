@@ -2,6 +2,20 @@
 
 ---
 
+## [2.0.3] - 2026-11-04
+
+### Changed
+
+- Requires `gas-dev-release` `^1.3.0`, whose release preflight checks that the peer declarations' `@version` header matches `package.json`
+- Requires `gas-dev-config` `^1.9.0`
+- `.prettierignore` lists `.claude/worktrees`, `.claude/plans` and `.claude/handoff`, as required by `gas-dev-config check`
+
+### Fixed
+
+- The vendored gas-lock peer declarations are re-copied from gas-lock 1.2.2
+
+---
+
 ## [2.0.2] - 2026-11-04
 
 ### Changed
