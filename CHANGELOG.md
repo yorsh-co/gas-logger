@@ -7,6 +7,7 @@
 ### Changed
 
 - Peer type declarations are synced with `gas-dev-config peers sync`; `peers:check` script added
+- The peer declarations' usage header points consumers at `gas-dev-config peers sync` instead of a manual copy
 
 ---
 
