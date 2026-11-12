@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { createGasLoader, loadOrderFiles } from 'gas-dev-config/test';
+import { createGasLoader, loadOrderFiles } from 'gasdev/test';
 import { createMocks, type Mocks } from './mocks';
 
 type Level = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
@@ -36,7 +36,7 @@ export type GasLoggerConstructor = new (
 
 export const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
-/** Source files in load order, from `gasDevConfig.loadOrder`. */
+/** Source files in load order, from `gasdev.loadOrder`. */
 export const SOURCE_FILES = loadOrderFiles(ROOT);
 
 const load = createGasLoader<{ GasLogger: GasLoggerConstructor }>({
