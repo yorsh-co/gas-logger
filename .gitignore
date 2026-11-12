@@ -5,3 +5,9 @@ node_modules/
 dist/
 .worktrees/
 .ignore
+
+# Local agent state and secrets
+.claude/worktrees/
+.claude/plans/
+.claude/handoff/
+.env
